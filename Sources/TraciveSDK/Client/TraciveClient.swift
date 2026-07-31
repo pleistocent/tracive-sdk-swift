@@ -1,0 +1,425 @@
+import Foundation
+
+/// The SDK's entry point (§2, §4).
+///
+/// ```swift
+/// let tracive = TraciveClient(
+///   mode: .oauth(
+///     clientId: "bca-mobile",
+///     redirectUri: URL(string: "https://app.bca.co.id/tracive")!,
+///     scopes: ["scammer.check", "credits.read"],
+///     partnerUserId: partnerCustomerHash
+///   ),
+///   cache: try? SQLiteCheckCache()
+/// )
+///
+/// switch await tracive.authorize() {
+/// case .authorized: break
+/// case .appNotInstalled: showInstallPrompt()
+/// default: return
+/// }
+///
+/// let result = try await tracive.checkScammer(
+///   .bankAccount(countryAlpha3: "IDN", bankCode: "BCA", account: "1234567890")
+/// )
+/// ```
+///
+/// ## Three things to know before integrating
+///
+/// 1. **The backend does not exist yet.** There is no live `/v1/*` route in
+///    the Tracive API. Everything here is written against the documented
+///    contract and verified against an injected fake transport; no test in this package opens a
+///    socket.
+/// 2. **Every call is billed, including a miss** (§3.2). That is why queries are validated locally
+///    before a request goes out, why the cache exists, and why a 5xx is not blindly retried.
+/// 3. **There is no API-key parameter, in any mode** (§11.1). A mobile binary cannot keep a secret.
+///
+/// ## Do not poll `credits()`
+///
+/// §3.3 is explicit: do **not** call `credits()` before each check. Handle the 402 from
+/// `checkScammer` instead — it saves one round trip per transaction, and a balance read a moment
+/// earlier can be stale by the time the check lands anyway.
+///
+/// The type is an `actor`, but it never holds its executor across a network call, so several checks
+/// can be in flight at once.
+public actor TraciveClient {
+
+  // MARK: - Configuration
+
+  public nonisolated let mode: TraciveMode
+  public nonisolated let environment: TraciveEnvironment
+  /// The freshness rules this client was configured with.
+  ///
+  /// When a `cache` is injected, **its own `policy` is what actually governs reads** — freshness is
+  /// decided inside the store (see `CheckCache`), which is what lets a stale row be dropped on the
+  /// way past. This property is the configured value and is used to build the default cache.
+  public nonisolated let cachePolicy: CachePolicy
+  /// The `source` used when a call does not name one.
+  public nonisolated let defaultSource: Source
+  public nonisolated let retryPolicy: RetryPolicy
+  /// The local encrypted result cache (§5). Backs `client.cache.clear()`.
+  ///
+  /// Never optional: `NoOpCheckCache` stands in when caching is off, so every path here can call
+  /// the cache unconditionally instead of threading an optional through the check flow.
+  public nonisolated let cache: any CheckCache
+  /// Why the default cache could not be opened, when it could not.
+  ///
+  /// The SDK degrades to `NoOpCheckCache` rather than refusing to start — but silently paying for
+  /// checks that should have been free is exactly the kind of expensive-and-quiet failure worth
+  /// surfacing, so the reason is kept here instead of being swallowed. Log it at startup.
+  public nonisolated let cacheInitializationError: (any Error)?
+  /// The OAuth flow driver. `nil` in Proxy mode, which is phase 2.
+  public nonisolated let oauth: TraciveOAuth?
+
+  private let transport: any HTTPTransport
+  private let clock: any TraciveClock
+
+  // MARK: - Init
+
+  /// - Parameters:
+  ///   - mode: `.oauth(…)` today. `.proxy(…)` exists so adding it in phase 2 is not a breaking
+  ///     change; every call in that mode throws `TraciveError.notImplemented`.
+  ///   - cachePolicy: TTL rules (§5). Used to build the default cache; ignored when `cache` is
+  ///     supplied, since an injected store carries its own policy.
+  ///   - transport: test seam. Defaults to `URLSessionHTTPTransport`.
+  ///   - clock: test seam for TTL and backoff. Defaults to wall time.
+  ///   - cache: the encrypted result store. When omitted, an on-disk `SQLiteCheckCache` is opened
+  ///     if the policy is enabled, falling back to `NoOpCheckCache` (and recording
+  ///     `cacheInitializationError`) if that fails. **Tests should always pass one explicitly** —
+  ///     the default touches Application Support and the Keychain.
+  ///   - tokenStore: where OAuth tokens live. Defaults to the Keychain. Ignored if `oauth` is
+  ///     supplied.
+  ///   - oauth: a pre-built OAuth driver, for a host app that needs a custom app launcher or a
+  ///     non-default authorize endpoint. When present it wins over `tokenStore`.
+  public init(
+    mode: TraciveMode,
+    environment: TraciveEnvironment = .production,
+    cachePolicy: CachePolicy = .default,
+    defaultSource: Source = .cacheFirst,
+    transport: (any HTTPTransport)? = nil,
+    clock: (any TraciveClock)? = nil,
+    cache: (any CheckCache)? = nil,
+    tokenStore: (any TraciveTokenStore)? = nil,
+    retryPolicy: RetryPolicy = .default,
+    oauth: TraciveOAuth? = nil
+  ) {
+    let resolvedTransport = transport ?? URLSessionHTTPTransport()
+    let resolvedClock = clock ?? TraciveSystemClock()
+
+    self.mode = mode
+    self.environment = environment
+    self.cachePolicy = cachePolicy
+    self.defaultSource = defaultSource
+    self.retryPolicy = retryPolicy
+    self.transport = resolvedTransport
+    self.clock = resolvedClock
+
+    if let cache {
+      self.cache = cache
+      self.cacheInitializationError = nil
+    } else if cachePolicy.isEnabled {
+      let clockForCache = resolvedClock
+      do {
+        self.cache = try SQLiteCheckCache(
+          policy: cachePolicy,
+          now: { clockForCache.now }
+        )
+        self.cacheInitializationError = nil
+      } catch {
+        self.cache = NoOpCheckCache(policy: cachePolicy)
+        self.cacheInitializationError = error
+      }
+    } else {
+      self.cache = NoOpCheckCache(policy: cachePolicy)
+      self.cacheInitializationError = nil
+    }
+
+    if let oauth {
+      self.oauth = oauth
+    } else if let oauthConfiguration = mode.oauthConfiguration {
+      self.oauth = TraciveOAuth(
+        configuration: oauthConfiguration,
+        environment: environment,
+        transport: resolvedTransport,
+        tokenStore: tokenStore,
+        clock: resolvedClock
+      )
+    } else {
+      self.oauth = nil
+    }
+  }
+
+  // MARK: - Checks
+
+  /// Checks one identifier against Tracive's scammer index (§4).
+  ///
+  /// - Parameters:
+  ///   - query: a validated, folded key. Building it already rejected anything that could not hit,
+  ///     which matters commercially: a miss is billed, so a key that can never hit is a wasted
+  ///     credit (§3.2).
+  ///   - source: cache-versus-network strategy. `nil` uses `defaultSource`.
+  ///   - detail: `.minimal` (default) or `.full`. `.full` adds `topChronologies` and `comments`,
+  ///     needs a contractual rider server-side, and is **never** cached.
+  ///   - locale: BCP-47. Only meaningful for `.full`; omitted from the request otherwise, because
+  ///     `minimal` is always English and a stray field would change the payload behind an
+  ///     `Idempotency-Key`.
+  ///   - idempotencyKey: pass one if you intend to retry. **Without it the SDK will not retry** a
+  ///     5xx, a 429 or a timeout, because it cannot tell whether the first attempt was charged
+  ///     (§7). The same key is reused on every attempt, which is what lets the server deduplicate.
+  ///
+  /// - Throws: `TraciveError`. Notable cases: `.cacheMiss` for `source == .cache` with no fresh
+  ///   entry, `.insufficientCredits` for a 402 (handle it — do not pre-poll `credits()`),
+  ///   `.notImplemented` in Proxy mode.
+  public func checkScammer(
+    _ query: TraciveQuery,
+    source: Source? = nil,
+    detail: Detail = .minimal,
+    locale: String? = nil,
+    idempotencyKey: String? = nil
+  ) async throws -> CheckResult {
+    try requireOAuthMode()
+
+    let resolvedSource = source ?? defaultSource
+    let key = CheckCacheKey(query: query)
+
+    switch resolvedSource {
+    case .cache:
+      // Deliberately the throwing read: this is the one mode that has to tell a miss from a
+      // storage fault. A miss becomes `.cacheMiss`; a fault surfaces as itself, because answering
+      // "no reports" when the truth is "the disk is broken" would be a fabricated clean verdict —
+      // the single worst thing a fraud SDK can do.
+      let stored: CheckResult?
+      do {
+        stored = try cache.read(key)
+      } catch let error as CheckCacheError {
+        throw error.asTraciveError
+      }
+      guard let stored else { throw TraciveError.cacheMiss }
+      return stored
+
+    case .cacheFirst:
+      if let hit = cache.readIgnoringFailures(key) { return hit }
+      return try await fetchAndStore(
+        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
+
+    case .server:
+      return try await fetchAndStore(
+        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
+
+    case .serverFirst:
+      do {
+        return try await fetchAndStore(
+          query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
+      } catch let error as TraciveError {
+        // "Network first, fall back to cache when it fails" (§11.2) means a *transport-shaped*
+        // failure — offline, 5xx, rate limited. A 402 or a 403 is a real answer about the caller's
+        // account, and quietly serving a cached verdict instead would hide a billing or permission
+        // problem until it became someone else's incident.
+        guard error.isTransient, let hit = cache.readIgnoringFailures(key) else { throw error }
+        return hit
+      }
+    }
+  }
+
+  /// `GET /v1/credits` — the user's remaining subscription credits (§4).
+  ///
+  /// Read the warning on this type: do not call this before each check.
+  public func credits() async throws -> CreditsInfo {
+    try requireOAuthMode()
+    let request = HTTPRequest(
+      method: .get,
+      url: TraciveAPI.url(TraciveAPI.credits, in: environment),
+      headers: ["Accept": "application/json"]
+    )
+    // A GET has no side effects and cannot double-charge, so it is always retryable.
+    let response = try await sendAuthorized(request, isRetryable: true)
+    return try TraciveResponseMapper.decode(CreditsInfo.self, from: response, now: clock.now)
+  }
+
+  /// `GET /v1/profile` — the minimal profile behind the grant (§4).
+  ///
+  /// `sub` is a pairwise pseudonymous id: different partners see different values for the same
+  /// Tracive user, and the underlying Firebase uid never leaves the server.
+  public func profile() async throws -> ProfileInfo {
+    try requireOAuthMode()
+    let request = HTTPRequest(
+      method: .get,
+      url: TraciveAPI.url(TraciveAPI.profile, in: environment),
+      headers: ["Accept": "application/json"]
+    )
+    let response = try await sendAuthorized(request, isRetryable: true)
+    return try TraciveResponseMapper.decode(ProfileInfo.self, from: response, now: clock.now)
+  }
+
+  // MARK: - Cache
+
+  /// Empties the local result cache. Equivalent to `client.cache.clear()` (§5).
+  public func clearCache() throws {
+    try cache.clear()
+  }
+
+  // MARK: - OAuth passthrough
+
+  /// Runs the consent flow. See `TraciveOAuth.authorize()`.
+  @discardableResult
+  public func authorize() async -> AuthResult {
+    guard let oauth else {
+      return .failed(.proxyModeNotImplemented)
+    }
+    return await oauth.authorize()
+  }
+
+  /// Forwards the redirect from `AppDelegate`/`SceneDelegate`. See
+  /// `TraciveOAuth.handleCallback(url:)`.
+  @discardableResult
+  public func handleCallback(url: URL) async -> AuthResult {
+    guard let oauth else {
+      return .failed(.proxyModeNotImplemented)
+    }
+    return await oauth.handleCallback(url: url)
+  }
+
+  /// Revokes the grant best-effort and clears local tokens regardless of the outcome (§6).
+  public func signOut() async {
+    await oauth?.signOut()
+  }
+
+  /// Whether a grant is stored. Not a liveness check — the server may have revoked it since.
+  public var isAuthorized: Bool {
+    get async {
+      guard let oauth else { return false }
+      return await oauth.isAuthorized
+    }
+  }
+
+  // MARK: - Internals
+
+  private func requireOAuthMode() throws {
+    // Proxy mode is phase 2. The type exists in the surface so adding it later is not a breaking
+    // change (§2); until then every call fails with the exact message the spec names.
+    guard mode.oauthConfiguration != nil, oauth != nil else {
+      throw TraciveError.proxyModeNotImplemented
+    }
+  }
+
+  private func fetchAndStore(
+    _ query: TraciveQuery,
+    detail: Detail,
+    locale: String?,
+    idempotencyKey: String?,
+    key: CheckCacheKey
+  ) async throws -> CheckResult {
+    let body = ScammerCheckRequestBody(query: query, detail: detail, locale: locale)
+    let encoded: Data
+    do {
+      encoded = try JSONEncoder().encode(body)
+    } catch {
+      throw TraciveError.sdk("invalid_request_body", "The check request could not be encoded.")
+    }
+
+    var headers = [
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    ]
+    if let idempotencyKey, !idempotencyKey.isEmpty {
+      headers["Idempotency-Key"] = idempotencyKey
+    }
+
+    let request = HTTPRequest(
+      method: .post,
+      url: TraciveAPI.url(TraciveAPI.scammerChecks, in: environment),
+      headers: headers,
+      body: encoded
+    )
+
+    // §7's retry rule, applied at the only place it matters: a check may be repeated only when the
+    // caller gave us a key that lets the server deduplicate the charge.
+    let isRetryable = !(idempotencyKey ?? "").isEmpty
+    let response = try await sendAuthorized(request, isRetryable: isRetryable)
+
+    let decoded = try TraciveResponseMapper.decode(CheckResult.self, from: response, now: clock.now)
+    // The server sends no provenance; stamp it here so `fetchedAt` is measured on the same clock
+    // the TTL is measured on, rather than on whatever `CheckResult.init(from:)` defaulted to.
+    let result = decoded.withOrigin(.server, fetchedAt: clock.now)
+
+    // The store persists `cacheableCopy()` itself, dropping checkId/billing/chronologies/comments.
+    // A failed write must never fail a check that already succeeded — it costs one credit next
+    // time, nothing more.
+    cache.writeIgnoringFailures(result, for: key)
+
+    return result
+  }
+
+  /// Sends an authenticated request, handling the 401 refresh dance and the retry policy.
+  ///
+  /// - Parameter isRetryable: whether repeating this exact request is safe. `true` for GETs and for
+  ///   a check carrying an `Idempotency-Key`; `false` otherwise, in which case a 5xx, a 429 or a
+  ///   timeout is surfaced immediately rather than risking a second charge (§7).
+  private func sendAuthorized(
+    _ request: HTTPRequest,
+    isRetryable: Bool
+  ) async throws -> HTTPResponse {
+    guard let oauth else { throw TraciveError.proxyModeNotImplemented }
+
+    var completedAttempts = 0
+    var didRefresh = false
+
+    while true {
+      let token = try await oauth.accessToken()
+      var authorized = request
+      authorized.setHeader("Authorization", to: "Bearer " + token)
+
+      let response: HTTPResponse
+      do {
+        response = try await transport.send(authorized)
+        completedAttempts += 1
+      } catch {
+        completedAttempts += 1
+        let mapped = (error as? TraciveError) ?? .network(cause: error)
+        guard isRetryable, retryPolicy.allowsAnotherAttempt(after: completedAttempts) else {
+          throw mapped
+        }
+        try await clock.sleep(for: retryPolicy.delay(forRetry: completedAttempts))
+        continue
+      }
+
+      if response.status == 401 {
+        let info = TraciveResponseMapper.errorInfo(from: response.body)
+        switch info.code {
+        case "grant_revoked":
+          // Usually the server's refresh-token reuse detection firing. The grant is gone; keeping
+          // the tokens would only produce more failures. Do not retry (§6).
+          await oauth.clearStoredTokens()
+          throw TraciveError.grantRevoked(info)
+
+        case "expired_token" where !didRefresh:
+          didRefresh = true
+          // Single-flight: concurrent 401s funnel into one `POST /oauth/token`. Getting this wrong
+          // trips the server's reuse detection, which revokes the whole grant.
+          _ = try await oauth.refreshTokens(staleAccessToken: token)
+          // A 401 is rejected before billing, so re-sending after a refresh cannot double-charge
+          // and does not consume the retry budget.
+          continue
+
+        default:
+          break
+        }
+      }
+
+      let isTransientStatus = response.status >= 500 || response.status == 429
+      if isTransientStatus, isRetryable, retryPolicy.allowsAnotherAttempt(after: completedAttempts)
+      {
+        let retryAfter = TraciveError.retryAfterSeconds(
+          from: response.header("Retry-After"),
+          now: clock.now
+        )
+        try await clock.sleep(
+          for: retryPolicy.delay(forRetry: completedAttempts, retryAfter: retryAfter)
+        )
+        continue
+      }
+
+      return response
+    }
+  }
+}

@@ -1,0 +1,50 @@
+# SwiftPM
+.build/
+.swiftpm/
+Packages/
+# There are no dependencies, so this file should never exist. If it appears, a dependency was added
+# — see the guard in .github/workflows/ci.yml.
+Package.resolved
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+build/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# CocoaPods. This package has no third-party dependencies and ships through SwiftPM only, but a
+# partner evaluating it inside a Pods-based app can leave one of these behind.
+Pods/
+*.xcworkspace
+
+# Sibling-SDK build output. Nothing here produces these, but this repo is one of three SDK repos
+# that vendor the same query-grammar fixture, and files get copied between them by hand. A build
+# directory must never be committed.
+build/
+.gradle/
+.dart_tool/
+
+# Local cache artefacts produced by SQLiteCheckCache during manual testing
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Secrets. Nothing in this SDK needs an API key (§11.1) — if one of these shows up in a working
+# copy, something is being integrated the wrong way.
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+.env
+.env.*
+secrets.json
+
+# macOS
+.DS_Store

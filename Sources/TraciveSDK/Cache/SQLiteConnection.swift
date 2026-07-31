@@ -1,0 +1,180 @@
+import Foundation
+import SQLite3
+
+/// `SQLITE_TRANSIENT` tells SQLite to copy the bound bytes immediately.
+///
+/// It is a `#define` for `((sqlite3_destructor_type)-1)`, which does not survive the C-to-Swift
+/// import, so it has to be reconstructed. Using `SQLITE_STATIC` instead would be a use-after-free
+/// waiting to happen: the `Data` we bind from is a local whose buffer is gone by the time
+/// `sqlite3_step` runs.
+private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/// A minimal wrapper over the system `libsqlite3` C API.
+///
+/// Deliberately not a general-purpose SQLite library: it exposes exactly what
+/// `SQLiteCheckCache` needs. Anything more would be a database layer we have to maintain, and the
+/// alternative — taking a dependency — is the one thing this package will not do (§11.6).
+///
+/// Not thread-safe by itself. `SQLiteCheckCache` owns the only instance and serialises every call
+/// behind its own lock.
+final class SQLiteConnection {
+
+  private let handle: OpaquePointer
+
+  /// - Parameter path: a filesystem path, or `":memory:"` for a private in-memory database.
+  init(path: String) throws {
+    var db: OpaquePointer?
+    // FULLMUTEX so a stray call from another thread cannot corrupt the connection even though the
+    // store already serialises. Belt and braces on a shared mutable C handle is cheap insurance.
+    let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+    let code = sqlite3_open_v2(path, &db, flags, nil)
+
+    guard code == SQLITE_OK, let opened = db else {
+      let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unable to open database"
+      // sqlite3_open_v2 may hand back a handle even on failure; it still has to be closed.
+      if let db { sqlite3_close_v2(db) }
+      throw CheckCacheError.cannotOpenStore(path: path, code: code, message: message)
+    }
+    self.handle = opened
+  }
+
+  deinit {
+    // `_v2` so the handle is released once any straggling statement is finalised, rather than
+    // leaking on `SQLITE_BUSY`.
+    sqlite3_close_v2(handle)
+  }
+
+  /// Runs one or more statements that return no rows.
+  func execute(_ sql: String) throws {
+    var errorPointer: UnsafeMutablePointer<CChar>?
+    let code = sqlite3_exec(handle, sql, nil, nil, &errorPointer)
+    guard code == SQLITE_OK else {
+      let message = errorPointer.map { String(cString: $0) } ?? lastErrorMessage
+      sqlite3_free(errorPointer)
+      throw CheckCacheError.storageFailure(code: code, message: message)
+    }
+    sqlite3_free(errorPointer)
+  }
+
+  func prepare(_ sql: String) throws -> SQLiteStatement {
+    try SQLiteStatement(database: handle, sql: sql)
+  }
+
+  /// Rows changed by the most recent statement.
+  var changes: Int { Int(sqlite3_changes(handle)) }
+
+  var lastErrorMessage: String { String(cString: sqlite3_errmsg(handle)) }
+
+  /// Runs `body` inside `BEGIN IMMEDIATE` / `COMMIT`, rolling back on any throw.
+  ///
+  /// `IMMEDIATE` rather than the default deferred transaction: it takes the write lock up front, so
+  /// two processes sharing the file (an app and its extension) fail fast instead of deadlocking
+  /// halfway through and surfacing `SQLITE_BUSY` at commit time.
+  func transaction<T>(_ body: () throws -> T) throws -> T {
+    try execute("BEGIN IMMEDIATE;")
+    do {
+      let value = try body()
+      try execute("COMMIT;")
+      return value
+    } catch {
+      // A failed rollback is not worth masking the original error with.
+      try? execute("ROLLBACK;")
+      throw error
+    }
+  }
+}
+
+/// One prepared statement. Finalised on deinit, so no `defer` dance at the call sites.
+final class SQLiteStatement {
+
+  private let handle: OpaquePointer
+  private let database: OpaquePointer
+
+  fileprivate init(database: OpaquePointer, sql: String) throws {
+    var statement: OpaquePointer?
+    let code = sqlite3_prepare_v2(database, sql, -1, &statement, nil)
+    guard code == SQLITE_OK, let prepared = statement else {
+      let message = String(cString: sqlite3_errmsg(database))
+      if let statement { sqlite3_finalize(statement) }
+      throw CheckCacheError.storageFailure(code: code, message: message)
+    }
+    self.handle = prepared
+    self.database = database
+  }
+
+  deinit {
+    sqlite3_finalize(handle)
+  }
+
+  // MARK: - Binding
+  //
+  // Parameter indices are 1-based, unlike column indices below, which are 0-based. That is SQLite's
+  // convention, not a mistake.
+
+  func bind(_ index: Int32, text: String) throws {
+    try check(sqlite3_bind_text(handle, index, text, -1, SQLITE_TRANSIENT))
+  }
+
+  func bind(_ index: Int32, blob: Data) throws {
+    let code = blob.withUnsafeBytes { buffer -> Int32 in
+      guard let base = buffer.baseAddress, buffer.count > 0 else {
+        // An empty payload is never legitimate here (a sealed box is at least 28 bytes), but bind a
+        // zero-length blob rather than a NULL so a NOT NULL column still rejects it loudly.
+        return sqlite3_bind_zeroblob(handle, index, 0)
+      }
+      return sqlite3_bind_blob(handle, index, base, Int32(buffer.count), SQLITE_TRANSIENT)
+    }
+    try check(code)
+  }
+
+  func bind(_ index: Int32, double: Double) throws {
+    try check(sqlite3_bind_double(handle, index, double))
+  }
+
+  func bind(_ index: Int32, int: Int64) throws {
+    try check(sqlite3_bind_int64(handle, index, int))
+  }
+
+  // MARK: - Stepping
+
+  /// Advances the statement.
+  ///
+  /// - Returns: `true` when a row is available, `false` when the statement is done.
+  @discardableResult
+  func step() throws -> Bool {
+    let code = sqlite3_step(handle)
+    switch code {
+    case SQLITE_ROW: return true
+    case SQLITE_DONE: return false
+    default:
+      throw CheckCacheError.storageFailure(code: code, message: String(cString: sqlite3_errmsg(database)))
+    }
+  }
+
+  // MARK: - Reading (0-based columns)
+
+  func text(_ column: Int32) -> String? {
+    guard let pointer = sqlite3_column_text(handle, column) else { return nil }
+    return String(cString: pointer)
+  }
+
+  func blob(_ column: Int32) -> Data {
+    let count = Int(sqlite3_column_bytes(handle, column))
+    guard count > 0, let pointer = sqlite3_column_blob(handle, column) else { return Data() }
+    return Data(bytes: pointer, count: count)
+  }
+
+  func double(_ column: Int32) -> Double {
+    sqlite3_column_double(handle, column)
+  }
+
+  func int(_ column: Int32) -> Int64 {
+    sqlite3_column_int64(handle, column)
+  }
+
+  private func check(_ code: Int32) throws {
+    guard code == SQLITE_OK else {
+      throw CheckCacheError.storageFailure(code: code, message: String(cString: sqlite3_errmsg(database)))
+    }
+  }
+}

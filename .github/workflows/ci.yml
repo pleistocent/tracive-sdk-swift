@@ -1,0 +1,83 @@
+name: CI
+
+# Every unit test in this package runs offline against injected fakes — the Tracive Open API does
+# not exist yet, and no test may depend on a live host. If a job here ever needs network access to
+# go green, something has been wired up wrong.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: swift build + swift test (macOS)
+    # macOS because the package targets iOS 15 / macOS 12 and leans on CryptoKit, Security and the
+    # system libsqlite3. None of it exists on a Linux runner.
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        # Pin when the pinned version is on the image, otherwise fall back to the runner default.
+        # A hard pin breaks the build every time GitHub rotates its images; no pin at all makes a
+        # red build impossible to reproduce. This gets both.
+        run: |
+          if [ -d /Applications/Xcode_15.4.app ]; then
+            sudo xcode-select -switch /Applications/Xcode_15.4.app
+          else
+            echo "Xcode_15.4 not on this image; using $(xcode-select -p)"
+          fi
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Resolve dependencies
+        # There are none, and that is the point (§11.6). This step fails loudly the moment somebody
+        # adds one: `Package.resolved` should never be created.
+        run: |
+          swift package resolve
+          if [ -f Package.resolved ] && [ -s Package.resolved ]; then
+            if grep -q '"identity"' Package.resolved; then
+              echo "::error::A third-party dependency was added. This package must stay dependency-free (plan 11.6)."
+              cat Package.resolved
+              exit 1
+            fi
+          fi
+
+      - name: Build
+        run: swift build -v
+
+      - name: Test
+        run: swift test -v
+
+  build-example:
+    name: build the example app
+    runs-on: macos-14
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        # Pin when the pinned version is on the image, otherwise fall back to the runner default.
+        # A hard pin breaks the build every time GitHub rotates its images; no pin at all makes a
+        # red build impossible to reproduce. This gets both.
+        run: |
+          if [ -d /Applications/Xcode_15.4.app ]; then
+            sudo xcode-select -switch /Applications/Xcode_15.4.app
+          else
+            echo "Xcode_15.4 not on this image; using $(xcode-select -p)"
+          fi
+
+      - name: Build Example
+        # The example consumes the SDK exactly as a partner would, through a local path dependency.
+        # Building it here is what stops the README's sample code from rotting.
+        working-directory: Example
+        run: swift build -v

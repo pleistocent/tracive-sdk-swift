@@ -1,0 +1,91 @@
+# Security Policy
+
+## Reporting a vulnerability
+
+**Email `security@tracive.id`.** Please do not open a public GitHub issue, and please do not post
+details in a pull request or a discussion thread — this SDK sits in the fraud-warning path of other
+people's apps, and a public disclosure before a fix is available puts their users at risk, not ours.
+
+Include what you have:
+
+- what the issue is, and which version or commit you looked at,
+- how to reproduce it, ideally as a failing test against this package,
+- what an attacker gets out of it,
+- whether you have already told anyone else.
+
+If you would rather encrypt the report, say so in a first email with no details and we will send you
+a key.
+
+### What to expect
+
+| | |
+|---|---|
+| Acknowledgement | within 3 business days |
+| Initial assessment | within 10 business days |
+| Fix or a dated plan | depends on severity; we will keep you updated either way |
+| Credit | offered by default in `CHANGELOG.md` — tell us if you would rather stay anonymous |
+
+We will not pursue legal action against anyone who reports in good faith, stays within the scope
+below, and gives us a reasonable window to fix things before going public.
+
+## Scope
+
+**In scope** — anything in this repository:
+
+- key management, encryption or storage flaws in the local cache
+  (`Sources/TraciveSDK/Cache/`),
+- OAuth and PKCE flaws: state handling, token storage, refresh, revocation,
+- an identifier, a token or a cache key reaching a log, a crash report or a backup,
+- query folding that produces a key other than the one the vendored
+  `query-grammar-vectors.json` specifies,
+- anything that lets a caller be charged for a check they did not make.
+
+**Out of scope here** — report these to `security@tracive.id` as well, but they are not defects in
+this package:
+
+- the Tracive backend and the Open API (which, as of this release, is not deployed at all),
+- the Tracive consumer app,
+- issues that require a jailbroken device *and* physical access *and* the user's passcode.
+
+## Supported versions
+
+| Version | Supported |
+|---|---|
+| 0.1.x | yes |
+| < 0.1 | no |
+
+Until 1.0, security fixes ship on the latest minor only. There is no backport branch.
+
+## What this SDK deliberately does not do
+
+Some of these look like missing features. They are decisions, and re-adding them would be the
+vulnerability:
+
+- **No API key parameter, in any mode.** A key compiled into a mobile binary is a published
+  credential. OAuth mode carries a user-scoped token; Proxy mode (phase 2) carries headers minted by
+  the partner's own backend. Adding an `apiKey` parameter to any public type is a security
+  regression, not a convenience.
+- **No `WKWebView` for the consent flow.** RFC 8252 forbids it, and an in-app web view can read the
+  user's Tracive credentials as they are typed. The SDK uses `UIApplication.open` on a Universal
+  Link.
+- **No plaintext identifiers at rest.** Cache rows are keyed by `SHA-256(searchQueryIndex)` and the
+  payload is sealed with AES-GCM. The raw phone number, email or account number never touches disk.
+- **No tokens outside the Keychain.** Never `UserDefaults`, never a plist, never a file in the app
+  container.
+- **No automatic retry of a billed check.** A blind retry after a 5xx or a timeout can double-charge
+  a user; the caller must opt in by supplying an `Idempotency-Key`.
+- **No third-party dependencies.** Every package added here becomes code we ship into a partner's
+  app on someone else's release schedule. CI fails the build if a dependency appears.
+
+## Cryptography
+
+For the full design and threat model see [`Docs/caching.md`](Docs/caching.md). In summary:
+
+- **Payloads:** AES-256-GCM (CryptoKit), a fresh random 96-bit nonce per record, with the cache key
+  and schema version as additional authenticated data so a payload cannot be moved between rows.
+- **Data key:** 256-bit, held in the Keychain as
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`. Where a Secure Enclave exists the stored item
+  is not the key but a device-bound P-256 key-agreement blob; the AES key is derived through the
+  Enclave with HKDF-SHA256 on demand and never exists at rest.
+- **Cache keys:** SHA-256 of the folded query.
+- **PKCE:** S256 only. `plain` is never sent and never accepted.
