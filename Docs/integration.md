@@ -68,7 +68,7 @@ let tracive = TraciveClient(
   mode: .oauth(
     clientId: "your-client-id",
     redirectUri: URL(string: "https://yourapp.example.com/oauth/tracive")!,
-    scopes: ["scammer.check", "credits.read"],
+    scopes: [TraciveScopes.scammerCheck, TraciveScopes.creditsRead],
     partnerUserId: currentUser.id,   // optional; echoed back for your own reconciliation
     clientType: .public              // .confidential if your backend holds a client secret
   ),
@@ -77,6 +77,27 @@ let tracive = TraciveClient(
 ```
 
 There is no API key parameter. See the README for why that is deliberate and permanent.
+
+### `scopes`
+
+Ask for the narrowest set that works; every extra scope is one more permission the user has to
+accept on the consent screen. Name them with the `TraciveScopes` constants rather than typing the
+strings — the authorization server is the only thing that validates a scope name, and it rejects
+the *whole* consent request when it does not recognise one, so a typo is not a narrower grant, it is
+an integration that cannot authorize at all:
+
+| Constant | Wire value | Grants |
+|---|---|---|
+| `TraciveScopes.scammerCheck` | `scammer.check` | running a scammer check |
+| `TraciveScopes.creditsRead` | `credits.read` | reading the user's remaining credits |
+| `TraciveScopes.profileRead` | `profile.read` | reading the minimal user profile |
+
+`creditsRead` is for a settings or billing screen. You do **not** need it to handle a 402: the
+insufficient-credit signal rides on the check itself, which is why the SDK tells you not to poll
+`credits()` before every check.
+
+`detail: .full` needs a contractual rider server-side rather than an extra scope; requesting one you
+have no rider for buys nothing.
 
 ### `.public` vs `.confidential`
 
@@ -97,7 +118,7 @@ func connectTracive() async throws {
   switch await tracive.authorize() {
   case .authorized(let grantedScopes):
     // Check what you actually got — the user may have granted a subset.
-    guard grantedScopes.contains("scammer.check") else {
+    guard grantedScopes.contains(TraciveScopes.scammerCheck) else {
       showMessage("Tracive access is limited; scammer checks are unavailable.")
       return
     }

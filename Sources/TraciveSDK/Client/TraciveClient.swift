@@ -7,7 +7,7 @@ import Foundation
 ///   mode: .oauth(
 ///     clientId: "bca-mobile",
 ///     redirectUri: URL(string: "https://app.bca.co.id/tracive")!,
-///     scopes: ["scammer.check", "credits.read"],
+///     scopes: [TraciveScopes.scammerCheck, TraciveScopes.creditsRead],
 ///     partnerUserId: partnerCustomerHash
 ///   ),
 ///   cache: try? SQLiteCheckCache()

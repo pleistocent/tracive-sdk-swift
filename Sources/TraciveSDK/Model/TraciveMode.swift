@@ -56,6 +56,12 @@ public struct OAuthConfiguration: Equatable, Hashable, Sendable {
   /// Must be an App Link / Universal Link that the partner app owns. RFC 8252 forbids completing
   /// this flow in an in-app WebView, and App Links do not fire from one either.
   public let redirectUri: URL
+  /// The scopes to request. Name them with `TraciveScopes` rather than typing the strings: an
+  /// unrecognised scope makes the authorization server reject the *whole* consent request, so a
+  /// typo here is not a narrower grant, it is an integration that never authorizes.
+  ///
+  /// Kept as `[String]`, not a closed enum, because the granted set comes back from the server and
+  /// may name a scope registered after this SDK version shipped.
   public let scopes: [String]
   /// The partner's own stable id for the end user, echoed back for reconciliation. Optional.
   public let partnerUserId: String?

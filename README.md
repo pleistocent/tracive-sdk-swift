@@ -97,7 +97,7 @@ let client = TraciveClient(
   mode: .oauth(
     clientId: "your-client-id",
     redirectUri: URL(string: "https://yourapp.example.com/oauth/tracive")!,
-    scopes: ["scammer.check", "credits.read"]
+    scopes: [TraciveScopes.scammerCheck, TraciveScopes.creditsRead]
   ),
   environment: .production
 )
@@ -138,6 +138,22 @@ if result.found, result.riskTier == .high {
 A working, compiling SwiftUI example lives in [`Example/`](Example/) — it renders a result, honours
 the disclaimer, and runs entirely offline against an injected checker, which is exactly how you
 should unit-test your own integration.
+
+### Scopes
+
+`TraciveScopes` holds the wire strings. Use it instead of typing them:
+
+| Constant | Wire value | Grants |
+|---|---|---|
+| `TraciveScopes.scammerCheck` | `scammer.check` | running a scammer check |
+| `TraciveScopes.creditsRead` | `credits.read` | reading the user's remaining credits |
+| `TraciveScopes.profileRead` | `profile.read` | reading the minimal user profile |
+
+Ask for the narrowest set that works — every extra scope is one more permission on the consent
+screen. And note where a mistyped scope surfaces: the authorization server is the only thing that
+validates a scope name, and it rejects the **entire** consent request when it does not recognise
+one. A typo is not a smaller grant, it is an integration that cannot authorize at all, and nothing
+local will tell you.
 
 ---
 

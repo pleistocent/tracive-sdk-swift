@@ -358,12 +358,12 @@ final class ModelTests: XCTestCase {
     let confidential = TraciveMode.oauth(
       clientId: "partner-123",
       redirectUri: redirect,
-      scopes: ["scammer.check", "profile"],
+      scopes: ["scammer.check", "profile.read"],
       partnerUserId: "u-9",
       clientType: .confidential
     )
     XCTAssertEqual(confidential.oauthConfiguration?.clientType, .confidential)
-    XCTAssertEqual(confidential.oauthConfiguration?.scopes, ["scammer.check", "profile"])
+    XCTAssertEqual(confidential.oauthConfiguration?.scopes, ["scammer.check", "profile.read"])
   }
 
   func testProxyModeExistsButRedactsItsHeaders() throws {

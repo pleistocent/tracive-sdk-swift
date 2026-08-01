@@ -7,6 +7,30 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`TraciveScopes` — the OAuth scope names as public constants.** `scammerCheck`, `creditsRead`
+  and `profileRead` hold the exact wire strings, so an integrator no longer retypes them at every
+  call site. This is a new public type and therefore a (purely additive) change to the API surface.
+
+  Worth having because of where a mistyped scope surfaces. The authorization server is the only
+  thing that validates a scope name, and it rejects the **whole** consent request when it does not
+  recognise one — so a typo does not degrade into a narrower grant, it is an integration that
+  cannot authorize at all, discoverable only against a live server, and there is no live server
+  yet. Tests pin each constant against its literal value rather than against another symbol, so
+  renaming one fails the build instead of quietly redefining the contract.
+
+  They are `String` constants in a caseless `enum`, matching how `TraciveAppPresence` already
+  namespaces its wire strings, rather than a `RawRepresentable` enum. `grantedScopes` travels the
+  other way — it is whatever the *server* granted, possibly including a scope registered after this
+  version shipped — and a closed enum would have to fail or drop those; `[String]` is also the
+  frozen shape the sibling SDKs share.
+
+  There is no constant for the daily-usage aggregate, and the documentation scan now treats every
+  spelling of that scope as an offence. This SDK models no call that needs it, and publishing a
+  constant for a request it cannot make would only teach partners to ask a user for a permission
+  that buys them nothing. (Deliberately not spelled out here: the same test scans this file.)
+
 ### Fixed
 
 - **`TraciveQuery.email(value:)` accepted anything non-empty, and every typo was billed.**

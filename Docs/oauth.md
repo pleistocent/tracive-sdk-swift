@@ -186,12 +186,29 @@ person on the device should not inherit.
 
 ## Scopes
 
+`TraciveScopes` carries the exact wire strings:
+
+| Constant | Wire value | Grants |
+|---|---|---|
+| `TraciveScopes.scammerCheck` | `scammer.check` | running a scammer check |
+| `TraciveScopes.creditsRead` | `credits.read` | reading the user's remaining credits |
+| `TraciveScopes.profileRead` | `profile.read` | reading the minimal user profile |
+
+Use them instead of string literals. A scope name is validated in exactly one place — the
+authorization server — and an unknown one does not quietly produce a narrower grant: the entire
+consent request is rejected. That makes a typo an integration that never authorizes, discoverable
+only against a live server, and there is no live server yet.
+
+The constants are `String`, not a closed enum, because `grantedScopes` travels the other way: it is
+whatever the server says it granted, and that may include a scope registered after your copy of the
+SDK shipped.
+
 Ask for what you need and check what you got — the user may grant a subset, and the server may cap it
 by what your client is registered for:
 
 ```swift
 case .authorized(let grantedScopes):
-  guard grantedScopes.contains("scammer.check") else {
+  guard grantedScopes.contains(TraciveScopes.scammerCheck) else {
     showMessage("Tracive access is limited; scammer checks are unavailable.")
     return
   }

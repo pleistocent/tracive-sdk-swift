@@ -988,13 +988,15 @@ func makeOAuth(
   launcher: (any TraciveAppLauncher)? = nil,
   clock: RecordingClock = RecordingClock(),
   environment: TraciveEnvironment = .production,
-  clientType: ClientType = .public
+  clientType: ClientType = .public,
+  scopes: [String] = ["scammer.check", "credits.read"],
+  installURL: URL? = nil
 ) -> TraciveOAuth {
   TraciveOAuth(
     configuration: OAuthConfiguration(
       clientId: "test-client",
       redirectUri: URL(string: "https://partner.example.com/tracive/callback")!,
-      scopes: ["scammer.check", "credits.read"],
+      scopes: scopes,
       partnerUserId: "partner-user-1",
       clientType: clientType
     ),
@@ -1002,7 +1004,8 @@ func makeOAuth(
     transport: transport,
     tokenStore: tokenStore ?? InMemoryTokenStore(),
     appLauncher: launcher ?? FakeAppLauncher(canOpenAnything: true),
-    clock: clock
+    clock: clock,
+    installURL: installURL
   )
 }
 
@@ -1130,8 +1133,12 @@ extension AuthResult {
 /// merely asserted the canonical spelling would have passed happily while the README stayed wrong.
 final class DocumentedScopeTests: XCTestCase {
 
-  /// Every scope the authorization server is expected to register.
-  private static let canonicalScopes: Set<String> = ["scammer.check", "credits.read"]
+  /// Every scope the authorization server is expected to register, and the only ones the prose is
+  /// allowed to name. Spelled out as literals rather than through `TraciveScopes`, for the reason
+  /// `TraciveScopeConstantTests` gives.
+  private static let canonicalScopes: Set<String> = [
+    "scammer.check", "credits.read", "profile.read",
+  ]
 
   private static var repositoryRoot: URL {
     URL(fileURLWithPath: #filePath)  // Tests/TraciveSDKTests/OAuthTests.swift
@@ -1159,7 +1166,14 @@ final class DocumentedScopeTests: XCTestCase {
 
     // Anything shaped like one of our scope namespaces. Deliberately broad: the point is to catch a
     // *plausible-looking but wrong* scope, which is exactly what "scammer.read" was.
-    let pattern = try NSRegularExpression(pattern: "\\b(?:scammer|credits)\\.[a-z]+\\b")
+    //
+    // `usage` is in the alternation without being in `canonicalScopes`, on purpose. The
+    // authorization server does register a daily-usage scope, and this SDK models no call that
+    // needs it — so every spelling of it is an offence here. Documenting one would teach partners
+    // to ask a user for a permission that buys them nothing, and `TraciveScopes` deliberately
+    // ships no constant for it.
+    let pattern = try NSRegularExpression(
+      pattern: "\\b(?:scammer|credits|profile|usage)\\.[a-z]+\\b")
 
     var offences: [String] = []
     for file in files {
@@ -1182,8 +1196,14 @@ final class DocumentedScopeTests: XCTestCase {
 
   /// The other direction: the canonical strings the docs are checked against must be the ones the
   /// SDK really sends, or the check above would be pinning the wrong pair.
+  ///
+  /// Configured through `TraciveScopes`, so this also closes the loop the constants exist for — a
+  /// constant carrying a wrong value would land that wrong value in the `scope` parameter, and the
+  /// comparison against the literal set above is what catches it.
   func testTheCanonicalScopesAreTheOnesPutOnTheWire() async throws {
-    let oauth = makeOAuth()
+    let oauth = makeOAuth(scopes: [
+      TraciveScopes.scammerCheck, TraciveScopes.creditsRead, TraciveScopes.profileRead,
+    ])
     let request = try await oauth.makeAuthorizationRequest()
 
     let sent = URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
@@ -1192,5 +1212,42 @@ final class DocumentedScopeTests: XCTestCase {
       Set((sent ?? "").split(separator: " ").map(String.init)),
       Self.canonicalScopes
     )
+  }
+}
+
+// MARK: - The scope constants
+
+/// `TraciveScopes` holds the wire strings so integrators stop retyping them.
+///
+/// Every assertion below writes the expected value as a **literal**, never as another constant.
+/// That is the whole point of the class: comparing `TraciveScopes.scammerCheck` against itself, or
+/// against a shared symbol, would pass no matter what the value became. Renaming a constant breaks
+/// compilation here, and changing one's value fails the assertion — either way the contract cannot
+/// be redefined quietly, which matters because nothing else can check it: the authorization server
+/// is the only validator of a scope name and it is not deployed.
+final class TraciveScopeConstantTests: XCTestCase {
+
+  func testScammerCheckIsTheExactWireString() {
+    XCTAssertEqual(TraciveScopes.scammerCheck, "scammer.check")
+  }
+
+  func testCreditsReadIsTheExactWireString() {
+    XCTAssertEqual(TraciveScopes.creditsRead, "credits.read")
+  }
+
+  func testProfileReadIsTheExactWireString() {
+    XCTAssertEqual(TraciveScopes.profileRead, "profile.read")
+  }
+
+  /// Three distinct scopes, not two and a copy.
+  ///
+  /// A constant that duplicates its neighbour's value still passes a per-constant equality check if
+  /// the duplicate is the one the literal was copied from, and it silently asks for the wrong
+  /// permission. Pinning the set size is what makes that impossible.
+  func testTheConstantsAreThreeDistinctScopes() {
+    let scopes = [
+      TraciveScopes.scammerCheck, TraciveScopes.creditsRead, TraciveScopes.profileRead,
+    ]
+    XCTAssertEqual(Set(scopes).count, 3)
   }
 }
