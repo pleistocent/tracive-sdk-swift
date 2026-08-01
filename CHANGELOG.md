@@ -33,6 +33,38 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **Two overlapping checks of the same identifier were two requests and two charges.** The cache is
+  a billing feature — a miss costs exactly what a hit costs — but the cache write is the only
+  serialisation point in the check flow, and it happens after both requests have already left the
+  device. So both callers read the cache, both missed, both POSTed and both were billed. A
+  double-tapped button, or a list screen rendering the same identifier in two cells, doubled the
+  bill silently: two correct answers came back and nothing anywhere reported that one of them had
+  been paid for twice. `TraciveOAuth.refreshTokens` has had the right shape all along; this is the
+  same latch in the one place where the unit is currency rather than latency.
+
+  Concurrent checks for one identifier now share a single request, and both callers receive its
+  answer. **The latch key is the record key plus the detail level plus the locale**, not the record
+  key alone, and both extra components are load-bearing: a `.minimal` result handed to a caller who
+  asked for `.full` carries no `topChronologies` and no `comments`, which reads as "the server
+  answered in full and there is nothing on file", and `.full` results carry `tags` and `disclaimer`
+  in the language that was requested. A different identifier, detail level or locale is a different
+  question and goes out on its own.
+
+  **A caller whose task is already cancelled neither joins a flight nor starts one**, matching the
+  carve-out the React Native SDK makes for an explicit signal. It runs its own request exactly as
+  before, so the transport still observes the cancellation; joining would park a caller that has
+  been told to stop on somebody else's round trip, and starting a flight on its behalf would leave
+  the next caller joining work already on its way out.
+
+  **What changes for a caller who cancels mid-flight**: the request is no longer cancelled. An
+  unstructured `Task` does not inherit the waiting task's cancellation and `Task.value` does not
+  forward it, so a latched check runs to completion whoever walks away from it. That is the right
+  trade rather than the convenient one — one caller's cancellation must never cancel another
+  caller's check, and a POST already on the wire may already have been billed, so abandoning it
+  discards an answer that was paid for while letting it finish warms the cache and makes the next
+  check free. Cancelling a check was never part of this SDK's documented contract and no test
+  depended on it.
+
 - **A refresh that timed out left its refresh token in the store, and the next refresh sent it
   again — which is what makes a server revoke a grant.** The refresh token rotates, and presenting
   a rotated one is the exact pattern reuse detection looks for; the server's correct response is to

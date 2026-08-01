@@ -1058,6 +1058,11 @@ final class ClientTests: XCTestCase {
     // The failure this guards against is not a wasted request: presenting a rotated refresh token
     // a second time trips the server's **reuse detection**, which revokes the entire grant.
     // A racing refresh is therefore a logout for the user, not a retry.
+    //
+    // Six *different* identifiers, so the check latch does not collapse them: this test is about
+    // several checks racing for one refresh, and it can only be about that if several checks
+    // actually reach the network. A cold start with several screens firing at once is exactly the
+    // shape being reproduced, and those screens ask about different things.
     let concurrency = 6
     let gate = TestGate()
     let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
@@ -1075,9 +1080,10 @@ final class ClientTests: XCTestCase {
     let client = makeClient(transport: transport, tokenStore: store)
 
     let results = await withTaskGroup(of: Bool.self) { group -> [Bool] in
-      for _ in 0..<concurrency {
+      for index in 0..<concurrency {
+        let query = TestQueries.distinctPhones[index]
         group.addTask {
-          ((try? await client.checkScammer(TestQueries.phone, source: .server)) != nil)
+          ((try? await client.checkScammer(query, source: .server)) != nil)
         }
       }
 
@@ -1177,6 +1183,240 @@ final class ClientTests: XCTestCase {
     // The record is left exactly as it was found. Reading damage is not a reason to erase it, and
     // every subsequent call reports the same thing rather than a second, different failure.
     XCTAssertEqual(try store.load(), unusable)
+  }
+
+  // MARK: - Concurrent identical checks
+
+  /// A miss costs a credit just as a hit does, so the cache is a billing feature — and until the
+  /// latch landed it was one with a hole in it. Two overlapping checks for the same identifier both
+  /// read the cache, both missed, both POSTed and both were charged: the cache write is the only
+  /// serialisation point in the flow and it happens after both requests have already gone out. A
+  /// double-tapped button, or a list screen rendering the same identifier in two cells, doubled the
+  /// bill with nothing anywhere reporting it.
+  func testTwoOverlappingIdenticalChecksProduceOneBillableRequest() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+    let firstTier = TestResultBox<RiskTier>()
+    let secondTier = TestResultBox<RiskTier>()
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      if let result = try? await client.checkScammer(TestQueries.phone, source: .server) {
+        firstTier.set(result.riskTier)
+      }
+    } second: {
+      if let result = try? await client.checkScammer(TestQueries.phone, source: .server) {
+        secondTier.set(result.riskTier)
+      }
+    }
+
+    XCTAssertFalse(
+      sawASecondRequest,
+      "The second check sent its own request instead of joining the one already in flight."
+    )
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+    // Both callers get the answer. Collapsing the request must not collapse the callers.
+    XCTAssertEqual(firstTier.value, .high)
+    XCTAssertEqual(secondTier.value, .high)
+  }
+
+  /// The same collapse under `.cacheFirst`, which is the default source and therefore the shape a
+  /// double-tap actually takes. Both callers read a cold cache, both miss, and the miss is exactly
+  /// what used to be billed twice.
+  func testOverlappingChecksAreCollapsedUnderCacheFirstToo() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore())
+    let client = makeClient(transport: transport, cache: cache)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .cacheFirst)
+    } second: {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .cacheFirst)
+    }
+
+    XCTAssertFalse(sawASecondRequest)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+    // One request, one stored row, and the shared flight is what wrote it.
+    XCTAssertEqual(try cache.count(), 1)
+  }
+
+  /// A `.minimal` answer must never satisfy a caller who asked for `.full`: the stored projection
+  /// carries neither `topChronologies` nor `comments`, so handing it over reads as "the server
+  /// answered in full and there is nothing on file". That is why the latch key carries the detail
+  /// level and not the record key alone.
+  func testOverlappingChecksAtDifferentDetailLevelsAreNotCollapsed() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server, detail: .minimal)
+    } second: {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server, detail: .full)
+    }
+
+    XCTAssertTrue(sawASecondRequest, "A full-detail request joined a minimal one.")
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+  }
+
+  /// And the locale, for the same reason at one remove: `tags` and `disclaimer` come back in the
+  /// language that was asked for, so an Indonesian caller joining an English flight would render a
+  /// legal notice in a language the user did not choose.
+  func testOverlappingFullDetailChecksInDifferentLocalesAreNotCollapsed() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, detail: .full, locale: "en")
+    } second: {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, detail: .full, locale: "id")
+    }
+
+    XCTAssertTrue(sawASecondRequest, "Two locales shared one answer.")
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+  }
+
+  func testOverlappingChecksForDifferentIdentifiersAreNotCollapsed() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+    } second: {
+      _ = try? await client.checkScammer(TestQueries.email, source: .server)
+    }
+
+    XCTAssertTrue(sawASecondRequest, "Two different identifiers shared one answer.")
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+  }
+
+  /// The latch is released when the flight settles, not held for the process. A latch that leaked
+  /// would answer every later check for that identifier from one ancient response, which is the
+  /// cache's job and is governed by a TTL this map does not have.
+  func testTheLatchIsReleasedOnceTheCheckSettles() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    _ = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+    } second: {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+    }
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+
+    _ = try await client.checkScammer(TestQueries.phone, source: .server)
+
+    XCTAssertEqual(
+      transport.count(pathSuffix: "scammer-checks"), 2,
+      "A check after the flight settled must reach the server."
+    )
+  }
+
+  /// Released on the failing path too. The `defer` inside the flight is what guarantees it, and a
+  /// latch that survived a 5xx would pin an identifier to that error for the life of the client.
+  func testTheLatchIsReleasedAfterAFailureToo() async throws {
+    let gate = TestGate()
+    let transport = FakeHTTPTransport { request, index in
+      guard request.url.path.hasSuffix("scammer-checks") else {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      guard index == 0 else { return .ok(json: Fixtures.minimalCheckJSON) }
+      await gate.wait()
+      return .error(status: 500, code: "server_error")
+    }
+    let client = makeClient(transport: transport)
+    let firstKind = TestResultBox<TraciveErrorKind>()
+    let secondKind = TestResultBox<TraciveErrorKind>()
+
+    _ = await runOverlappingChecks(gate: gate, transport: transport) {
+      let error = await expectTraciveError {
+        try await client.checkScammer(TestQueries.phone, source: .server)
+      }
+      if let kind = error?.kind { firstKind.set(kind) }
+    } second: {
+      let error = await expectTraciveError {
+        try await client.checkScammer(TestQueries.phone, source: .server)
+      }
+      if let kind = error?.kind { secondKind.set(kind) }
+    }
+
+    // One failure, delivered to both callers rather than swallowed by one of them.
+    XCTAssertEqual(firstKind.value, .server)
+    XCTAssertEqual(secondKind.value, .server)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+
+    let later = try await client.checkScammer(TestQueries.phone, source: .server)
+    XCTAssertEqual(later.riskTier, .high)
+  }
+
+  /// The carve-out, ported from the React Native SDK where the signal is explicit.
+  ///
+  /// A caller whose task is already cancelled neither joins a flight nor starts one. Joining would
+  /// park a caller that has been told to stop on somebody else's round trip; starting one would
+  /// file a flight in the map on behalf of a caller who is not going to consume it, and the next
+  /// caller would join work begun by a task already on its way out. It runs its own request
+  /// instead, exactly as it did before the latch existed, so the transport still sees the
+  /// cancellation.
+  ///
+  /// This one does not fail against the pre-latch code — there was no latch to carve out of. It
+  /// fails against the latch with the `Task.isCancelled` guard removed, which is the mistake it
+  /// exists to catch.
+  func testACallerThatIsAlreadyCancelledNeitherJoinsNorStartsASharedFlight() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let liveCheckDone = TestResultBox<Bool>()
+    Task {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+      liveCheckDone.set(true)
+    }
+    let liveCheckIsParked = await waitUntil {
+      transport.count(pathSuffix: "scammer-checks") >= 1
+    }
+    XCTAssertTrue(liveCheckIsParked, "The first check never reached the transport.")
+
+    let cancelledCheckDone = TestResultBox<Bool>()
+    let cancelledCaller = Task<Void, Never> {
+      // Cancellation is delivered asynchronously, so wait for the task to actually observe it
+      // rather than assuming `cancel()` below has landed by the time the call is made.
+      while !Task.isCancelled { await Task.yield() }
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+      cancelledCheckDone.set(true)
+    }
+    cancelledCaller.cancel()
+
+    let cancelledCallerSentItsOwn = await waitUntil {
+      transport.count(pathSuffix: "scammer-checks") >= 2
+    }
+    XCTAssertTrue(
+      cancelledCallerSentItsOwn,
+      "A cancelled caller joined the shared flight instead of running on its own."
+    )
+
+    await gate.open()
+    let liveFinished = await liveCheckDone.settled()
+    let cancelledFinished = await cancelledCheckDone.settled()
+    XCTAssertNotNil(liveFinished)
+    XCTAssertNotNil(cancelledFinished)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+  }
+
+  /// A transport that parks every check on `gate` and answers the token endpoint straight away.
+  private static func gatedCheckTransport(_ gate: TestGate) -> FakeHTTPTransport {
+    FakeHTTPTransport { request, _ in
+      guard request.url.path.hasSuffix("scammer-checks") else {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      await gate.wait()
+      return .ok(json: Fixtures.minimalCheckJSON)
+    }
   }
 
   // MARK: - Privacy
@@ -1471,6 +1711,63 @@ actor TestGate {
   }
 }
 
+/// Runs `second` while `first` is still on the wire, and reports whether a second request appeared
+/// during the overlap.
+///
+/// The overlap has to be constructed rather than hoped for. Two children of a task group are free
+/// to run strictly one after the other, and a latch that is never contended proves nothing — a test
+/// built that way passes just as happily against code that has no latch at all. So `first` is
+/// parked inside the transport on `gate`, `second` starts only once that has happened, and the gate
+/// stays shut until `second` has had its chance to send.
+///
+/// That last part is a negative observation and there is no event to wait on instead: nothing
+/// announces a caller joining a latch. The window is enormous relative to what it watches for —
+/// code without a latch issues its request in the same breath as entering the client, with no
+/// suspension in between — so the failing direction is decided long before the window closes.
+///
+/// Both closures are awaited to completion before this returns, so a test can read whatever they
+/// recorded without racing them.
+func runOverlappingChecks(
+  gate: TestGate,
+  transport: FakeHTTPTransport,
+  window: TimeInterval = 0.5,
+  first: @escaping @Sendable () async -> Void,
+  second: @escaping @Sendable () async -> Void,
+  file: StaticString = #filePath,
+  line: UInt = #line
+) async -> Bool {
+  let firstDone = TestResultBox<Bool>()
+  Task {
+    await first()
+    firstDone.set(true)
+  }
+
+  let firstIsParked = await waitUntil { transport.count(pathSuffix: "scammer-checks") >= 1 }
+  XCTAssertTrue(
+    firstIsParked, "The first check never reached the transport.", file: file, line: line)
+
+  let secondDone = TestResultBox<Bool>()
+  let secondHasStarted = TestResultBox<Bool>()
+  Task {
+    secondHasStarted.set(true)
+    await second()
+    secondDone.set(true)
+  }
+  let secondStarted = await secondHasStarted.settled()
+  XCTAssertNotNil(secondStarted, "The second check never started.", file: file, line: line)
+
+  let sawASecondRequest = await waitUntil(timeout: window) {
+    transport.count(pathSuffix: "scammer-checks") >= 2
+  }
+
+  await gate.open()
+  let firstFinished = await firstDone.settled()
+  let secondFinished = await secondDone.settled()
+  XCTAssertNotNil(firstFinished, "The first check never finished.", file: file, line: line)
+  XCTAssertNotNil(secondFinished, "The second check never finished.", file: file, line: line)
+  return sawASecondRequest
+}
+
 /// Polls `condition` until it holds or the deadline passes. Returns whether it held.
 func waitUntil(
   timeout: TimeInterval = 5,
@@ -1547,6 +1844,13 @@ enum TestQueries {
   static let email = try! TraciveQuery.email(value: "budi@example.com")
   static let bank = try! TraciveQuery.bankAccount(
     countryAlpha3: "IDN", bankCode: "BCA", account: "1234567890")
+
+  /// Six distinct numbers, for the tests that need several checks in flight at once. The check
+  /// latch collapses concurrent checks of the *same* identifier into one request, so a concurrency
+  /// test that reuses one query is no longer testing concurrency.
+  static let distinctPhones: [TraciveQuery] = (0..<6).map {
+    try! TraciveQuery.phone(e164: "+628123456789\($0)")
+  }
 }
 
 /// Canned wire payloads.

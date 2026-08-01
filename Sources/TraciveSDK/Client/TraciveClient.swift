@@ -41,7 +41,8 @@ import Foundation
 /// earlier can be stale by the time the check lands anyway.
 ///
 /// The type is an `actor`, but it never holds its executor across a network call, so several checks
-/// can be in flight at once.
+/// can be in flight at once. Two overlapping checks for the *same* identifier are the exception:
+/// they share one request and therefore one charge. See `latchedFetch`.
 public actor TraciveClient {
 
   // MARK: - Configuration
@@ -73,6 +74,10 @@ public actor TraciveClient {
 
   private let transport: any HTTPTransport
   private let clock: any TraciveClock
+  /// The checks currently on the wire, keyed on the record key plus the detail level and the
+  /// locale. This one map *is* the single-flight guarantee for billable checks; `latchedFetch`
+  /// says what it covers and what it deliberately does not.
+  private var inFlightChecks: [String: Task<CheckResult, Error>] = [:]
 
   // MARK: - Init
 
@@ -202,6 +207,14 @@ public actor TraciveClient {
   ///     and it is not a substitute for passing a key derived from your transaction if you want
   ///     retries or cross-process deduplication.
   ///
+  /// ## Overlapping identical checks are billed once
+  ///
+  /// While a check for one identifier is on the wire, a second check for that same identifier at
+  /// the same `detail` and `locale` joins it instead of sending a second request: both callers get
+  /// the one answer, and the partner pays for it once. A different identifier, a different detail
+  /// level or a different locale is a different question and goes out on its own. See
+  /// `latchedFetch` for why the key is all three, and for what happens to a cancelled caller.
+  ///
   /// - Throws: `TraciveError`. Notable cases: `.cacheMiss` for `source == .cache` with no fresh
   ///   entry, `.insufficientCredits` for a 402 (handle it — do not pre-poll `credits()`),
   ///   `.notImplemented` in Proxy mode.
@@ -263,18 +276,18 @@ public actor TraciveClient {
 
     case .cacheFirst:
       if cacheApplies, let hit = cache.readIgnoringFailures(key) { return hit }
-      return try await fetchAndStore(
+      return try await latchedFetch(
         query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
         cacheApplies: cacheApplies)
 
     case .server:
-      return try await fetchAndStore(
+      return try await latchedFetch(
         query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
         cacheApplies: cacheApplies)
 
     case .serverFirst:
       do {
-        return try await fetchAndStore(
+        return try await latchedFetch(
           query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
           cacheApplies: cacheApplies)
       } catch let error as TraciveError {
@@ -436,6 +449,84 @@ public actor TraciveClient {
   /// query, since that would collapse two deliberate re-checks of the same identifier into one.
   private static func generatedIdempotencyKey() -> String {
     "sdk-" + UUID().uuidString.lowercased()
+  }
+
+  /// Runs `fetchAndStore` **single-flight**, because here the unit is currency.
+  ///
+  /// Two overlapping checks for the same identifier both read the cache, both missed, both POSTed
+  /// and both were charged: the cache write is the only serialisation point in the flow and it
+  /// happens after both requests have already left the device. A double-tapped button, or a list
+  /// screen rendering the same identifier in two cells, doubled the bill — silently, because two
+  /// correct answers arrive and nothing anywhere reports that one of them was paid for twice.
+  /// `TraciveOAuth.refreshTokens` has had the right shape all along; this is the same latch in the
+  /// one place where the cost of missing it is money rather than latency.
+  ///
+  /// **The key is the record key plus the detail level plus the locale**, not the record key alone.
+  /// A `.minimal` result must never be handed to a caller who asked for `.full` — it carries no
+  /// `topChronologies` and no `comments`, which reads as "the server answered in full and there is
+  /// nothing on file" — and a `.full` answer in one language must never satisfy a request for
+  /// another, since `tags` and `disclaimer` come back in the language that was asked for. Only a
+  /// `.full` request sends a locale, so the empty string stands for "none sent" and cannot collide
+  /// with a real BCP-47 tag.
+  ///
+  /// The lookup and the insert happen with no `await` between them, which is the whole point: the
+  /// actor cannot interleave there, so a second caller either finds the flight above or starts the
+  /// only other one. Getting that wrong reintroduces exactly the race this exists to close.
+  ///
+  /// ## What this deliberately does not cover
+  ///
+  /// **A caller whose task is already cancelled neither joins a flight nor starts one.** It runs
+  /// its own request, exactly as before, so the transport still observes the cancellation and the
+  /// call fails the way it does today. Joining would make a caller that has been told to stop wait
+  /// on somebody else's round trip; starting one would file a flight in the map on behalf of a
+  /// caller who is not going to consume it, and the next caller would then join work begun by a
+  /// task already on its way out.
+  ///
+  /// **A shared flight is not cancelled by any of its participants**, and that is a real change
+  /// from running the request inline. `Task.value` does not forward the waiting task's
+  /// cancellation, and an unstructured `Task` does not inherit it, so once a check is latched it
+  /// runs to completion whoever walks away from it. That is the right trade rather than merely the
+  /// convenient one: one caller's cancellation must never cancel another caller's check, and a POST
+  /// already on the wire may already have been billed — abandoning it discards an answer that was
+  /// paid for, while letting it finish warms the cache and makes the next check free. Cancellation
+  /// of a check has never been part of this SDK's contract and no `.full` or `.minimal` path
+  /// depended on it.
+  ///
+  /// The cache write lives inside the flight rather than in each caller, so a collapsed check is
+  /// stored once. React Native latches the network call only and writes per caller; the observable
+  /// behaviour is the same and the request count — the thing that is billed — is identical.
+  private func latchedFetch(
+    _ query: TraciveQuery,
+    detail: Detail,
+    locale: String?,
+    idempotencyKey: String?,
+    key: CheckCacheKey,
+    cacheApplies: Bool
+  ) async throws -> CheckResult {
+    guard !Task.isCancelled else {
+      return try await fetchAndStore(
+        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
+        cacheApplies: cacheApplies)
+    }
+
+    let latchKey = "\(key.hex)|\(detail.rawValue)|\(locale ?? "")"
+    if let inFlight = inFlightChecks[latchKey] {
+      return try await inFlight.value
+    }
+
+    let task = Task<CheckResult, Error> { [self] in
+      defer { clearInFlightCheck(latchKey) }
+      return try await fetchAndStore(
+        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
+        cacheApplies: cacheApplies)
+    }
+    inFlightChecks[latchKey] = task
+    return try await task.value
+  }
+
+  /// Releases a latch. Isolated to the actor, so the removal cannot interleave with a lookup.
+  private func clearInFlightCheck(_ latchKey: String) {
+    inFlightChecks[latchKey] = nil
   }
 
   /// - Parameter cacheApplies: whether this response may be persisted. `false` for `detail: .full`,
