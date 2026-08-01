@@ -85,7 +85,7 @@ Request from the SDK:
 ```http
 POST /tracive/scammer-checks
 Authorization: <whatever you put in authHeaders>
-Idempotency-Key: <optional, caller-supplied>
+Idempotency-Key: <always present; caller-supplied, or SDK-generated and prefixed `sdk-`>
 Content-Type: application/json
 
 {
@@ -134,8 +134,10 @@ a 429; it is what `TraciveError.rateLimited(retryAfter:)` reads.
   payment screen.
 - **Do not fold or rewrite the `query` field.** The SDK has already folded it, and that same folded
   string is the local cache key. Re-folding it server-side can only introduce a mismatch.
-- **Do not drop `Idempotency-Key`.** It is the only thing standing between a retried check and a
-  double charge.
+- **Do not drop `Idempotency-Key`.** It is the only thing standing between a repeated check and a
+  double charge. It is always present — the SDK generates one (prefixed `sdk-`) when the caller
+  supplies none, because the SDK re-sends a check after refreshing an expired token and that replay
+  must be collapsible even if you bill before authorising. Forward it verbatim.
 
 ---
 

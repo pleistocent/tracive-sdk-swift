@@ -68,7 +68,10 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(request.url.absoluteString, "https://api.tracive.id/v1/scammer-checks")
     XCTAssertEqual(request.header("Authorization"), "Bearer access-1")
     XCTAssertEqual(request.header("Content-Type"), "application/json")
-    XCTAssertNil(request.header("Idempotency-Key"))
+    // Present even though the caller passed no key: the SDK generates one so its own post-refresh
+    // replay is collapsible server-side. Asserted as a prefixed, non-empty value rather than as
+    // absent, which is what this line used to check.
+    XCTAssertTrue(try XCTUnwrap(request.header("Idempotency-Key")).hasPrefix("sdk-"))
 
     let body = try Self.jsonObject(request.body)
     XCTAssertEqual(body["creditSource"] as? String, "USER")
@@ -104,6 +107,76 @@ final class ClientTests: XCTestCase {
     _ = try await client.checkScammer(TestQueries.phone, idempotencyKey: "txn-42")
 
     XCTAssertEqual(transport.requests.first?.header("Idempotency-Key"), "txn-42")
+  }
+
+  /// Every check carries an `Idempotency-Key`, including the ones where the caller supplied none.
+  ///
+  /// The SDK re-sends the *same* non-idempotent POST after a 401 refresh. Without a key on both
+  /// attempts the two are indistinguishable to the server, so anything that bills before or during
+  /// authorisation double-charges with no way for the caller to detect it. The SDK cannot know the
+  /// server's ordering — the server does not exist yet — so it must not depend on it.
+  func testAGeneratedIdempotencyKeyIsAttachedWhenTheCallerSuppliesNone() async throws {
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
+    let client = makeClient(transport: transport)
+
+    _ = try await client.checkScammer(TestQueries.phone)
+
+    let key = try XCTUnwrap(transport.requests.first?.header("Idempotency-Key"))
+    XCTAssertFalse(key.isEmpty)
+  }
+
+  /// The key must be per-call, not per-client: two distinct checks are two distinct charges, and
+  /// reusing one key would let the server collapse them into one.
+  func testEachCheckGetsItsOwnGeneratedIdempotencyKey() async throws {
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
+    let client = makeClient(transport: transport)
+
+    _ = try await client.checkScammer(TestQueries.phone, source: .server)
+    _ = try await client.checkScammer(TestQueries.email, source: .server)
+
+    let keys = transport.requests.compactMap { $0.header("Idempotency-Key") }
+    XCTAssertEqual(keys.count, 2)
+    XCTAssertNotEqual(keys[0], keys[1], "two separate checks must not share one key")
+  }
+
+  /// The whole point: the post-refresh replay carries the *same* key as the first attempt, so the
+  /// server can collapse the two into one charge.
+  func testThe401ReplayReusesTheSameGeneratedIdempotencyKey() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("oauth/token") {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return request.header("Authorization") == "Bearer access-1"
+        ? .error(status: 401, code: "expired_token")
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    _ = try await client.checkScammer(TestQueries.phone)
+
+    let checkKeys = transport.requests
+      .filter { $0.url.path.hasSuffix("scammer-checks") }
+      .map { $0.header("Idempotency-Key") }
+    XCTAssertEqual(checkKeys.count, 2, "the check should have been sent twice")
+    XCTAssertNotNil(checkKeys[0])
+    XCTAssertEqual(
+      checkKeys[0], checkKeys[1],
+      "the replay must reuse the first attempt's key, or the server cannot deduplicate the charge"
+    )
+  }
+
+  /// Attaching a generated key must not quietly buy the caller a retry budget they did not ask for.
+  /// `isRetryable` still keys off a *caller-supplied* key: without one, a 5xx is surfaced
+  /// immediately, exactly as README and SECURITY.md promise.
+  func testAGeneratedKeyDoesNotMakeAnUnkeyedCheckRetryable() async throws {
+    let transport = FakeHTTPTransport { _, _ in .error(status: 503, code: nil) }
+    let client = makeClient(transport: transport)
+
+    let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
+
+    XCTAssertEqual(error?.kind, .server)
+    XCTAssertEqual(transport.callCount, 1, "an unkeyed check must not be retried on a 5xx")
   }
 
   func testCreditsAndProfileUseTheEnvironmentBaseURL() async throws {

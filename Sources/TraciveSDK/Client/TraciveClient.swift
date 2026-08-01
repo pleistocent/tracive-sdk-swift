@@ -175,6 +175,12 @@ public actor TraciveClient {
   ///     5xx, a 429 or a timeout, because it cannot tell whether the first attempt was charged
   ///     (§7). The same key is reused on every attempt, which is what lets the server deduplicate.
   ///
+  ///     Note that the request always carries *some* `Idempotency-Key`: when you supply none the
+  ///     SDK generates a per-call one, so that its own replay after a 401 token refresh can be
+  ///     collapsed server-side. That does not give you a retry budget — only your own key does —
+  ///     and it is not a substitute for passing a key derived from your transaction if you want
+  ///     retries or cross-process deduplication.
+  ///
   /// - Throws: `TraciveError`. Notable cases: `.cacheMiss` for `source == .cache` with no fresh
   ///   entry, `.insufficientCredits` for a 402 (handle it — do not pre-poll `credits()`),
   ///   `.notImplemented` in Proxy mode.
@@ -310,6 +316,16 @@ public actor TraciveClient {
     }
   }
 
+  /// A per-call key for a check the caller did not key itself.
+  ///
+  /// Prefixed so a key the SDK invented is distinguishable from a partner's own in a server-side
+  /// log — useful when reconciling a disputed charge. A v4 UUID is the right shape here: the key
+  /// only has to be unique, never guessable or reproducible, and it must never be derived from the
+  /// query, since that would collapse two deliberate re-checks of the same identifier into one.
+  private static func generatedIdempotencyKey() -> String {
+    "sdk-" + UUID().uuidString.lowercased()
+  }
+
   private func fetchAndStore(
     _ query: TraciveQuery,
     detail: Detail,
@@ -325,13 +341,25 @@ public actor TraciveClient {
       throw TraciveError.sdk("invalid_request_body", "The check request could not be encoded.")
     }
 
-    var headers = [
+    let callerKey = idempotencyKey.flatMap { $0.isEmpty ? nil : $0 }
+
+    // Every check carries an `Idempotency-Key`, whether the caller supplied one or not.
+    //
+    // The SDK re-sends this exact POST after a 401 refresh (see `sendAuthorized`). Without a key
+    // the two attempts are indistinguishable to the server, so any billing that happens before or
+    // during authorisation is charged twice, with no way for the caller to detect it. This code
+    // used to justify that with "a 401 is rejected before billing" — an assumption about a server
+    // that does not exist yet, and the one premise this SDK otherwise refuses to make anywhere.
+    // Generating a key removes the need to assume anything.
+    //
+    // A generated key is *not* a licence to retry: `isRetryable` below still keys off the caller's
+    // key, so a 5xx, a 429 or a timeout on an unkeyed check is still surfaced immediately, exactly
+    // as README and SECURITY.md promise. The key only makes the SDK's own replay collapsible.
+    let headers = [
       "Content-Type": "application/json",
       "Accept": "application/json",
+      "Idempotency-Key": callerKey ?? Self.generatedIdempotencyKey(),
     ]
-    if let idempotencyKey, !idempotencyKey.isEmpty {
-      headers["Idempotency-Key"] = idempotencyKey
-    }
 
     let request = HTTPRequest(
       method: .post,
@@ -342,7 +370,7 @@ public actor TraciveClient {
 
     // §7's retry rule, applied at the only place it matters: a check may be repeated only when the
     // caller gave us a key that lets the server deduplicate the charge.
-    let isRetryable = !(idempotencyKey ?? "").isEmpty
+    let isRetryable = callerKey != nil
     let response = try await sendAuthorized(request, isRetryable: isRetryable)
 
     let decoded = try TraciveResponseMapper.decode(CheckResult.self, from: response, now: clock.now)
@@ -405,8 +433,11 @@ public actor TraciveClient {
           // Single-flight: concurrent 401s funnel into one `POST /oauth/token`. Getting this wrong
           // trips the server's reuse detection, which revokes the whole grant.
           _ = try await oauth.refreshTokens(staleAccessToken: token)
-          // A 401 is rejected before billing, so re-sending after a refresh cannot double-charge
-          // and does not consume the retry budget.
+          // Re-send the identical request. It carries an `Idempotency-Key` — `fetchAndStore`
+          // attaches one even when the caller did not — so if the first attempt was billed after
+          // all, the server can collapse the two into a single charge. This replay deliberately
+          // does not consume the retry budget: it is a re-authentication, not a retry of a failed
+          // check.
           continue
 
         default:

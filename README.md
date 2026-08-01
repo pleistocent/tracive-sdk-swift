@@ -258,6 +258,11 @@ let result = try await client.checkScammer(query, idempotencyKey: key)
 // …a retry of *this* check reuses `key`, and the server collapses the duplicate.
 ```
 
+The request always carries *some* `Idempotency-Key`: when you supply none, the SDK generates a
+per-call one (prefixed `sdk-`). That exists so the SDK's own replay after a 401 token refresh can be
+collapsed server-side — it is not a retry budget, and it cannot deduplicate across your own process
+restarts. Supply your own key, derived from your transaction, whenever you intend to retry.
+
 ### Surface the disclaimer
 
 `CheckResult.disclaimer` is not decoration. Tracive's data is community-submitted, and a UI that
