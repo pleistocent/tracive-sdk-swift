@@ -358,12 +358,12 @@ final class ModelTests: XCTestCase {
     let confidential = TraciveMode.oauth(
       clientId: "partner-123",
       redirectUri: redirect,
-      scopes: ["scammer:check", "profile"],
+      scopes: ["scammer.check", "profile"],
       partnerUserId: "u-9",
       clientType: .confidential
     )
     XCTAssertEqual(confidential.oauthConfiguration?.clientType, .confidential)
-    XCTAssertEqual(confidential.oauthConfiguration?.scopes, ["scammer:check", "profile"])
+    XCTAssertEqual(confidential.oauthConfiguration?.scopes, ["scammer.check", "profile"])
   }
 
   func testProxyModeExistsButRedactsItsHeaders() throws {
@@ -497,10 +497,10 @@ final class ModelTests: XCTestCase {
   func testErrorEnvelopeDecodes() throws {
     let envelope = try decode(
       TraciveErrorEnvelope.self,
-      #"{ "error": { "code": "missing_scope", "message": "scope 'scammer:check' not granted", "checkId": null }, "traceId": "t-1" }"#
+      #"{ "error": { "code": "missing_scope", "message": "scope 'scammer.check' not granted", "checkId": null }, "traceId": "t-1" }"#
     )
     XCTAssertEqual(envelope.error.code, "missing_scope")
-    XCTAssertEqual(envelope.error.message, "scope 'scammer:check' not granted")
+    XCTAssertEqual(envelope.error.message, "scope 'scammer.check' not granted")
     XCTAssertNil(envelope.error.checkId)
 
     let mapped = TraciveError.from(
