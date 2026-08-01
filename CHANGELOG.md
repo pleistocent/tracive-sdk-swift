@@ -86,11 +86,12 @@ source compatibility until the API freezes at 1.0.
 
 ### Changed
 
-- `query-grammar-vectors.json` updated to **version 4**: 34 vectors and 11 rejection cases. The
-  `nfcScope` note now states correctly that NFC applies to *every* code field, the bank code
-  included, and a new `bank-code-nfc-composes-before-uppercasing` vector pins it — composition there
-  is length-changing, so an implementation that skipped it would build keys that can never match.
-  The Swift suite now also pins the vector and rejection counts, so a vector dropped during a
+- `query-grammar-vectors.json` updated to **version 5**: 34 vectors, 14 rejection cases and 9
+  document-id guard cases. The `nfcScope` note now states correctly that NFC applies to *every* code
+  field, the bank code included, and a new `bank-code-nfc-composes-before-uppercasing` vector pins
+  it — composition there is length-changing, so an implementation that skipped it would build keys
+  that can never match. Version 5 adds the three query-validation rules listed above. The Swift
+  suite now also pins the vector, rejection and guard-case counts, so a case dropped during a
   re-vendor fails the build instead of shrinking the contract silently.
 - `TraciveError` and `AuthResult` are now **checked** `Sendable` rather than `@unchecked`. The
   `any Error` payload never blocked conformance, so the opt-out was unnecessary — and it was
