@@ -1398,6 +1398,89 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(Self.formFields(transport.requests.last?.body)["refresh_token"], "refresh-1")
   }
 
+  /// A 2xx does not prove the token was consumed, and treating it as proof revoked working grants.
+  ///
+  /// RFC 6749 does not require rotation. A conforming token endpoint may answer a refresh with the
+  /// **same** refresh token, and this SDK stores exactly what it is given — so the string in the
+  /// store afterwards is the string that just went out. Marking it spent on the strength of the
+  /// status alone therefore refused the next refresh locally, with `spent_refresh_token`, for the
+  /// life of the process: a client-side revocation of a grant the server had just renewed.
+  func testAServerThatReissuesTheSameRefreshTokenLeavesItUsable() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let reissued = """
+      {
+        "access_token": "access-2",
+        "refresh_token": "refresh-1",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "scope": "scammer.check credits.read"
+      }
+      """
+    let transport = FakeHTTPTransport { _, index in
+      index == 0 ? .ok(json: reissued) : .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let first = try await oauth.refreshTokens(staleAccessToken: "access-1")
+    XCTAssertEqual(first, "access-2")
+    // The server handed the same one back, so that is what the store holds.
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-1")
+
+    // The assertion this test exists for: the very next refresh still sends it.
+    let second = try await oauth.refreshTokens(staleAccessToken: "access-2")
+    XCTAssertEqual(second, "access-2")
+    XCTAssertEqual(transport.callCount, 2)
+    XCTAssertEqual(Self.formFields(transport.requests.last?.body)["refresh_token"], "refresh-1")
+  }
+
+  /// The same fault reached the other way: RFC 6749 §6 lets the response omit `refresh_token`
+  /// entirely, meaning "keep the one you have". `TraciveTokens.replacing(with:)` honours that and
+  /// carries the stored token forward — so, again, what the store holds afterwards is the string
+  /// that was just sent, and marking it spent locked the grant out of its next renewal.
+  func testAServerThatOmitsTheRefreshTokenLeavesTheCarriedForwardOneUsable() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let noRefreshToken = #"{"access_token":"access-9","token_type":"Bearer","expires_in":3600}"#
+    let transport = FakeHTTPTransport { _, index in
+      index == 0 ? .ok(json: noRefreshToken) : .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    _ = try await oauth.refreshTokens(staleAccessToken: "access-1")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-1")
+
+    let second = try await oauth.refreshTokens(staleAccessToken: "access-9")
+    XCTAssertEqual(second, "access-2")
+    XCTAssertEqual(transport.callCount, 2)
+    XCTAssertEqual(Self.formFields(transport.requests.last?.body)["refresh_token"], "refresh-1")
+  }
+
+  /// And the direction that keeps the release from disabling the history: a refresh that really did
+  /// rotate leaves the old token dead, and it stays refused.
+  ///
+  /// This is what makes the comparison in `performRefresh` load-bearing rather than decorative.
+  /// Releasing on any 2xx would put a rotated-away token back into circulation, and presenting one
+  /// of those is the pattern reuse detection answers by revoking the whole grant.
+  func testARotatedAwayRefreshTokenIsStillRefusedAfterASuccessfulRefresh() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    // One real rotation: refresh-1 is replaced by refresh-2.
+    _ = try await oauth.refreshTokens(staleAccessToken: "access-1")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
+
+    // The store moves backwards — a restored backup, or a host app writing its own copy back.
+    try store.save(Fixtures.storedTokens)
+
+    let error = await expectTraciveError {
+      try await oauth.refreshTokens(staleAccessToken: "access-1")
+    }
+    XCTAssertEqual(error?.kind, .invalidToken)
+    XCTAssertEqual(error?.serverCode, "spent_refresh_token")
+    // Refused locally: the rotation is the only request the transport ever saw.
+    XCTAssertEqual(transport.callCount, 1)
+  }
+
   /// Why the history holds eight entries rather than one.
   ///
   /// A single slot only ever answers for the most recent rotation. A store whose contents move

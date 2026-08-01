@@ -138,13 +138,18 @@ source compatibility until the API freezes at 1.0.
   next picks it up and sends it. Two ordinary sequential calls were enough, and no test in this
   package pinned it.
 
-  The SDK now records the refresh tokens it has actually put on the wire, and applies one rule.
-  **A complete HTTP response settles the question whatever its status** — a token endpoint that
-  answers with an error has issued no tokens (RFC 6749 §5.2), so the token was not consumed and is
-  spendable again. That half is what keeps the fix from being its own bug: without it a single
-  `500` would end a grant permanently. **No response at all settles nothing** — a socket timeout is
-  indistinguishable from a success whose reply was lost, so the token is treated as spent and the
-  caller is told to authorize again.
+  The SDK now records the refresh tokens it has put on the wire, and lifts the record on any answer
+  that proves the token survived. **An error response issues no tokens** (RFC 6749 §5.2), so the
+  token was not consumed and is spendable again — that half is what keeps the fix from being its own
+  bug, since without it a single `500` would end a grant permanently. **A success that hands the
+  same token back leaves it usable too**: RFC 6749 §6 does not require rotation, and permits both
+  re-issuing the same refresh token and omitting `refresh_token` entirely, which means "keep the one
+  you have" and is what this SDK stores. Reading any 2xx as a rotation would leave the marker on the
+  exact string the store now holds, so the *next* refresh would be refused locally with
+  `spent_refresh_token` and the user sent back through consent for the life of the process — a
+  client-side revocation of a grant the server had just renewed. **No response at all settles
+  nothing** — a socket timeout is indistinguishable from a success whose reply was lost, so the
+  token is treated as spent and the caller is told to authorize again.
 
   That last case costs a consent, and it is the better trade rather than the more timid one: if the
   token really was consumed, the grant already needed re-authorization and this avoids a revocation
@@ -153,6 +158,12 @@ source compatibility until the API freezes at 1.0.
   failure would prove the request never arrived and could safely be released — the SDK deliberately
   does not try to detect one, because `HTTPTransport` is a protocol an integrator may implement and
   matching on that error's shape would be guesswork about exactly the boundary the rule turns on.
+
+  What settles a success is therefore the token the store ends up holding, compared with the one
+  that went out — not the status. That comparison is load-bearing rather than a formality: releasing
+  on any success would put a genuinely rotated-away token back into circulation, which is the hazard
+  the record exists for. A 2xx whose body this SDK cannot decode keeps the record too, for the same
+  reason a lost reply does: it says nothing about what became of the token.
 
   **Two new codes, both on `TraciveError.invalidToken`, both terminal, both answered by
   `authorize()`.** `refresh_outcome_unknown` is a refresh that got no answer; `spent_refresh_token`
@@ -172,7 +183,8 @@ source compatibility until the API freezes at 1.0.
   grant is dropped, so a fresh consent starts clean.
 
   Kotlin, Flutter and React Native are landing the same guard; Flutter shipped it first and is the
-  reference for the rule.
+  reference for the rule. Kotlin and React Native met the non-rotating case first, while carrying a
+  token forward, and release the record on the same comparison.
 
 - **An unrecoverable stored grant was reported as `.grantRevoked`, which said the server had done
   something it had not done.** A stored record holding a blank access token with no refresh token

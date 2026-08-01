@@ -88,11 +88,16 @@ public actor TraciveOAuth {
   /// The in-flight refresh, if any. This single stored value *is* the single-flight guarantee.
   private var refreshTask: Task<TraciveTokens, Error>?
 
-  /// The refresh tokens this actor has actually handed to the server, oldest first.
+  /// The refresh tokens this actor has handed to the server and not been given back, oldest first.
   ///
-  /// A refresh token is single-use. Presenting one a second time is exactly what the server's reuse
-  /// detection is built to catch, and its answer is to revoke the **whole grant** rather than to
-  /// fail the one call — so the user is signed out of an integration that was working.
+  /// A rotated refresh token is dead. Presenting one a second time is exactly what the server's
+  /// reuse detection is built to catch, and its answer is to revoke the **whole grant** rather than
+  /// to fail the one call — so the user is signed out of an integration that was working.
+  ///
+  /// An entry goes on before the request leaves and comes off again on an answer that proves the
+  /// token survived: an error response, which issues no tokens, or a success carrying that same
+  /// token back. Only the answers that leave the question open — no response at all, or a rotation
+  /// this token was replaced by — leave it on. See `releaseRefreshToken`.
   ///
   /// `refreshTask` above does not cover this, and the reason is worth being precise about. That
   /// latch answers "is a refresh running *right now*", which is the concurrent case: several 401s
@@ -706,10 +711,13 @@ public actor TraciveOAuth {
   /// surfaces `.grantRevoked`. That is not retryable and must not be retried: the usual cause is
   /// the server's reuse detection having already killed the grant.
   ///
-  /// A refresh token this flow has already presented is **never** presented again, even when it is
-  /// still what the store holds. That call fails locally, sending nothing, with `.invalidToken`
-  /// carrying the code `spent_refresh_token`; see `spentRefreshTokens` for why a token can end up
-  /// in that state.
+  /// A refresh token this flow has presented and **not** been given back is never presented again,
+  /// even when it is still what the store holds. That call fails locally, sending nothing, with
+  /// `.invalidToken` carrying the code `spent_refresh_token`; see `spentRefreshTokens` for why a
+  /// token can end up in that state.
+  ///
+  /// A server that answers a refresh with the same refresh token, or with no `refresh_token` field
+  /// at all, has given it back — RFC 6749 §6 permits both — and that token stays usable.
   ///
   /// A refresh that failed with **no HTTP response at all** fails with `.invalidToken` carrying
   /// `refresh_outcome_unknown`, and its token is treated as spent — nobody can say whether the
@@ -930,10 +938,25 @@ public actor TraciveOAuth {
       )
     }
 
-    // The server answered, and it answered with an error, so nothing was issued and this token is
-    // spendable again. A 2xx is the opposite: the pair has rotated and the old token is dead from
-    // here on — including when the body carrying its replacement turns out to be undecodable, which
-    // is a response this SDK cannot read rather than one the server did not send.
+    // An error response issues no tokens (RFC 6749 §5.2), so this one was not consumed and the
+    // marker comes off here, before anything is decoded.
+    //
+    // **A 2xx does not settle it on its own**, which is what this rule used to assume. Rotation is
+    // not required of the server: RFC 6749 §6 lets a token endpoint answer a refresh with the same
+    // refresh token, or omit `refresh_token` altogether — which means "keep the one you have", and
+    // is what `TraciveTokens.replacing(with:)` already honours. In both of those cases the token
+    // about to be stored is the exact string that just went out, so leaving the marker on it
+    // refuses the *next* refresh locally with `spent_refresh_token` and sends the user back through
+    // consent, permanently, for the life of the process. A guard built to avoid a server-side
+    // revocation would be performing a client-side one against a server that did nothing wrong.
+    //
+    // So the success case is decided further down, once the response has been read and the token
+    // that came back can be compared with the one that went out. Kotlin and React Native make the
+    // same comparison, having hit this while carrying a token forward.
+    //
+    // An undecodable 2xx keeps the marker, and that is the honest answer rather than an oversight:
+    // a body this SDK cannot read says nothing about what became of the token, which puts it with
+    // the reply that never arrived rather than with the ones that settle the question.
     if !response.isSuccess {
       releaseRefreshToken(refreshToken)
     }
@@ -975,6 +998,22 @@ public actor TraciveOAuth {
     // Rotation: replace the stored pair in one write so a crash cannot leave the old refresh token
     // behind to be replayed later.
     let merged = previous.replacing(with: refreshed)
+
+    // The token about to be stored is the one that went out, so the server did not rotate it away:
+    // either it re-issued the same string or it omitted `refresh_token` and the merge above kept
+    // ours. The server has just told us this credential is live, and the marker put on it before
+    // the request has to come off — otherwise the very next refresh reads the store, finds the
+    // token in the spent history, and refuses it locally.
+    //
+    // **The comparison is the load-bearing half of this, not a formality.** Releasing on any 2xx
+    // would put a genuinely rotated-away token back into circulation, and presenting one of those a
+    // second time is exactly what reuse detection answers by revoking the whole grant — the hazard
+    // the history exists for. A real rotation leaves a *different* string in `merged`, so it takes
+    // this branch nowhere near.
+    if merged.refreshToken == refreshToken {
+      releaseRefreshToken(refreshToken)
+    }
+
     try tokenStore.save(merged)
     return merged
   }
@@ -1065,8 +1104,13 @@ public actor TraciveOAuth {
     }
   }
 
-  /// Takes `token` back off the spent list, for the one case that proves it was never consumed:
-  /// the server answered with an error, and an error response issues no tokens.
+  /// Takes `token` back off the spent list, for the two answers that prove it is still live.
+  ///
+  /// The server answered with an **error**, and an error response issues no tokens; or the server
+  /// answered with a **success that handed this same token back** — by re-issuing it, or by
+  /// omitting `refresh_token` and leaving the stored one in place. Both are permitted by RFC 6749,
+  /// and in both the store ends up holding the string that was just sent, so a marker left on it
+  /// would refuse the next refresh of a perfectly good grant.
   private func releaseRefreshToken(_ token: String) {
     spentRefreshTokens.removeAll { $0 == token }
   }

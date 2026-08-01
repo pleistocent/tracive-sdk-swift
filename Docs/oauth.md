@@ -380,10 +380,17 @@ So the SDK records the refresh tokens it has actually put on the wire, and appli
 | Outcome of the refresh | The token is |
 |---|---|
 | any complete HTTP response with an error status | **not** spent — an error response issues no tokens (RFC 6749 §5.2), so it may be sent again |
-| a 2xx | spent — the pair has rotated |
+| a 2xx carrying a **different** refresh token | spent — the pair has rotated and this one is dead |
+| a 2xx carrying the **same** refresh token, or no `refresh_token` at all | **not** spent — the server handed it back, so it stays usable |
 | no response at all | treated as spent — nobody can say which of the two happened |
 
-The middle case is why one `500`, or one rate limit, does not end a grant. The last case costs a
+Those two 2xx rows are one rule seen twice: what settles the question is whether the token the store
+ends up holding is the one that was just sent. RFC 6749 does not require rotation — §6 permits a
+server to re-issue the same refresh token, and permits omitting the field entirely, which means "keep
+the one you have" and is what this SDK does. Treating any success as a rotation therefore refused the
+*next* refresh locally, for the life of the process, against a server that had done nothing wrong.
+
+The first row is why one `500`, or one rate limit, does not end a grant. The last row costs a
 consent, and it is worth being clear that this is the better trade rather than the more timid one: if
 the token really was consumed, the grant already needed re-authorization and this avoids a revocation
 event on top of it; if it was not, the price is one consent the user did not strictly need. Retrying
