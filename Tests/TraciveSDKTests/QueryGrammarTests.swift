@@ -190,9 +190,13 @@ final class QueryGrammarTests: XCTestCase {
   func testFixtureIsTheExpectedContract() throws {
     let fixture = try loadFixture()
 
-    XCTAssertEqual(fixture.version, 2, "fixture schema version changed — re-read the rules")
-    XCTAssertFalse(fixture.vectors.isEmpty)
-    XCTAssertFalse(fixture.rejected.isEmpty)
+    XCTAssertEqual(fixture.version, 3, "fixture schema version changed — re-read the rules")
+
+    // Pinned counts, not just non-emptiness. The fixture is vendored byte-identically into every
+    // SDK; a vector silently dropped during a re-vendor would otherwise leave this suite green
+    // while the contract shrank.
+    XCTAssertEqual(fixture.vectors.count, 34, "a vector was added or removed — re-read the fixture")
+    XCTAssertEqual(fixture.rejected.count, 11, "a rejection case was added or removed")
 
     // Every media category the backend emits must be exercised by at least one vector.
     let coveredTypes = Set(fixture.vectors.map(\.type))
@@ -478,11 +482,23 @@ final class QueryGrammarTests: XCTestCase {
     assertSameBytes(bank.searchQueryIndex, "BANK_DEU_DB_SS123", "ß through the bank builder")
   }
 
-  /// NFC is scoped: applied to email / username / platform / chain, never to bank accounts, crypto
-  /// addresses or phones. A decomposed bank account must survive decomposed.
+  /// NFC is scoped: applied to email, username and every *code* field (social/chain platform code
+  /// and bank code), never to bank account ids, crypto addresses or phones. A decomposed bank
+  /// account must survive decomposed; a decomposed bank code must not.
   func testNfcIsNotAppliedOutsideItsScope() throws {
     let fixture = try loadFixture()
     XCTAssertTrue(fixture.crossLanguageSemantics.nfcScope.contains("NOT applied"))
+
+    // The in-scope half, on bytes. Composition here is length-changing ('A' + U+0301 → U+00C1), so
+    // an implementation that skipped NFC on the bank code would build a longer key that can never
+    // match the server's. Nothing else in the suite covers the code field specifically.
+    let composedCode = try TraciveQuery.bankAccount(
+      countryAlpha3: "IDN", bankCode: "BCA\u{0301}", account: "1234567890")
+    assertSameBytes(
+      composedCode.searchQueryIndex,
+      "BANK_IDN_BC\u{00C1}_1234567890",
+      "bank code must be NFC-composed before uppercasing"
+    )
 
     let decomposed = "A\u{0301}123"  // 'A' + COMBINING ACUTE
     let bank = try TraciveQuery.bankAccount(
