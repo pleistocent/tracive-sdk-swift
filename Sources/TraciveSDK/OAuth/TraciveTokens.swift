@@ -38,13 +38,30 @@ public struct TraciveTokens: Codable, Equatable, Hashable, Sendable, CustomStrin
 
   /// Whether the access token is known to have expired at `date`.
   ///
-  /// Informational only: the SDK does **not** refresh pre-emptively on it. Refresh happens on
-  /// a 401 `expired_token`, and the server's clock is the one that decides — refreshing on a local
-  /// estimate would burn a refresh-token rotation every time a device's clock drifted forward.
-  /// `nil` `expiresAt` reads as "not known to be expired".
-  public func isExpired(at date: Date, leeway: TimeInterval = 0) -> Bool {
+  /// **Nothing in the SDK calls this.** It is offered because the expiry is data you may reasonably
+  /// want to read — pre-warming a session before a burst of checks, or showing the state of a
+  /// connection in a settings screen. It is not a hook the SDK acts on.
+  ///
+  /// What the SDK does instead is send the stored access token and, on the server's
+  /// `401 expired_token`, refresh once and replay the request. The reason is whose clock the
+  /// question is asked against. `expiresAt` is measured by the *device's* clock, which the SDK
+  /// neither controls nor can correct: a device running a few minutes fast reports every token
+  /// expired early, and a device that is hours out reports them expired the moment they are issued.
+  /// Refreshing off that estimate would rotate the refresh token far more often than the grant
+  /// actually needs — and because every rotation kills the previous token, each extra one is another
+  /// chance for a dead token to be presented, which the server's reuse detection is entitled to read
+  /// as a stolen-token replay and answer by revoking the whole grant. A wrong local clock would turn
+  /// into random sign-outs. The server's clock is the one that decides, so the SDK waits to be told.
+  ///
+  /// It takes no leeway parameter. A leeway is only meaningful to something that acts *before* the
+  /// deadline, and the SDK never does; offering the knob advertised a pre-emptive refresh this SDK
+  /// has never performed.
+  ///
+  /// A `nil` `expiresAt` — an issue response that carried no `expires_in` — reads as "not known to
+  /// be expired".
+  public func isExpired(at date: Date) -> Bool {
     guard let expiresAt else { return false }
-    return date.addingTimeInterval(leeway) >= expiresAt
+    return date >= expiresAt
   }
 
   /// Returns a copy carrying a freshly rotated pair, keeping the old refresh token if the server

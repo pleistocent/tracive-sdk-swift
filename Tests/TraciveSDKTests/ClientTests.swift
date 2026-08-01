@@ -814,6 +814,54 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
   }
 
+  /// Cold start: the first call of a session, with a stored token that expired while the app was
+  /// closed.
+  ///
+  /// This is the least-exercised corner of the reactive path, and it is the one with nothing in
+  /// front of it. Every other refresh test starts from a token the session has already used
+  /// successfully; here the very first request carries a token that is already dead, and the 401 is
+  /// the only thing that can discover it. In a sibling SDK a pre-emptive expiry check meant this
+  /// request never reached the server with a dead token at all — that check is being removed
+  /// everywhere, so this path becomes the only one, and it is worth pinning rather than assuming.
+  ///
+  /// The assertion that matters is the *first* outbound header: the SDK must send `access-1` even
+  /// though it is holding an `expiresAt` in the past. Sending it is the design, not an oversight.
+  func testAnExpiredStoredTokenIsRefreshedOnTheFirstCallOfASession() async throws {
+    let clock = RecordingClock()
+    let expired = TraciveTokens(
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      tokenType: "Bearer",
+      // An hour past its deadline: the ordinary state of a token after an overnight close.
+      expiresAt: clock.now.addingTimeInterval(-3600),
+      scopes: ["scammer.check", "credits.read"]
+    )
+    let store = InMemoryTokenStore(tokens: expired)
+    XCTAssertTrue(expired.isExpired(at: clock.now), "the fixture must actually be expired")
+
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("oauth/token") {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return request.header("Authorization") == "Bearer access-1"
+        ? .error(status: 401, code: "expired_token")
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, clock: clock, tokenStore: store)
+
+    let result = try await client.checkScammer(TestQueries.phone, source: .server)
+
+    XCTAssertEqual(result.riskTier, .high)
+    // The expired token went out rather than being pre-empted, and the 401 it earned drove exactly
+    // one refresh and one replay.
+    XCTAssertEqual(transport.requests.first?.header("Authorization"), "Bearer access-1")
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+    XCTAssertEqual(transport.requests.last?.header("Authorization"), "Bearer access-2")
+    XCTAssertEqual(try store.load()?.accessToken, "access-2")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
+  }
+
   func testGrantRevokedClearsTokensAndDoesNotRefresh() async throws {
     let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
     let transport = FakeHTTPTransport { _, _ in .error(status: 401, code: "grant_revoked") }

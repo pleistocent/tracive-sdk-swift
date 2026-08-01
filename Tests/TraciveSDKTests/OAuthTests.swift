@@ -649,6 +649,31 @@ final class OAuthTests: XCTestCase {
     XCTAssertTrue(attempt.isStale(at: started.addingTimeInterval(601)))
   }
 
+  /// `TraciveTokens.isExpired(at:)` reports the stored deadline and nothing more.
+  ///
+  /// The method survives as a read of the data; what it no longer offers is a leeway parameter. A
+  /// leeway is only meaningful to something that acts *before* the deadline, and this SDK never
+  /// does — it sends the token and refreshes on the server's `401 expired_token`. The knob
+  /// advertised a pre-emptive refresh that no code path here has ever performed.
+  ///
+  /// Verified capable of failing: flipping the comparison to `>` reddens the boundary case.
+  func testIsExpiredReadsTheStoredDeadlineWithNoLeeway() {
+    let issued = Date(timeIntervalSince1970: 1_760_000_000)
+    let tokens = TraciveTokens(accessToken: "a", expiresAt: issued.addingTimeInterval(3600))
+
+    XCTAssertFalse(tokens.isExpired(at: issued))
+    XCTAssertFalse(tokens.isExpired(at: issued.addingTimeInterval(3599)))
+    XCTAssertTrue(
+      tokens.isExpired(at: issued.addingTimeInterval(3600)),
+      "the deadline itself counts as expired"
+    )
+    XCTAssertTrue(tokens.isExpired(at: issued.addingTimeInterval(3601)))
+
+    // A grant issued without an `expires_in` is not *known* to be expired, so it reads as live and
+    // the 401 remains the thing that settles it.
+    XCTAssertFalse(TraciveTokens(accessToken: "a").isExpired(at: issued))
+  }
+
   /// A callback for an attempt older than the maximum age is refused, and the record is dropped.
   ///
   /// The clock advances by an absolute 601 seconds rather than by `maxAge + 1`, so this pins the

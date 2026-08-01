@@ -243,6 +243,24 @@ is the easier one to migrate later.
 | Refresh token | opaque, **rotating** — every refresh returns a new one |
 | Storage | Keychain, `ThisDeviceOnly`. Never `UserDefaults`, never a plist, never a file |
 
+### Expiry is handled reactively, and only reactively
+
+The SDK never refreshes ahead of the deadline. It sends the stored access token, and refreshes when
+the server answers `401 expired_token`.
+
+`TraciveTokens.isExpired(at:)` is available if you want to read the stored expiry yourself — to
+pre-warm a session before a burst of checks, say — but **the SDK does not consult it**, and acting on
+it is your decision rather than a switch that changes what the SDK does. It takes no leeway
+parameter, because a leeway only means something to code that acts before the deadline and none here
+does.
+
+The reason is whose clock the expiry belongs to. It is measured against the *device's* clock, which
+the SDK cannot control or correct, so a device running fast reports tokens expired early. Refreshing
+on that estimate would rotate the refresh token more often than the grant needs — and every extra
+rotation is another chance to present a token the server has already retired, which its reuse
+detection may read as a stolen-token replay and answer by revoking the grant. The server's clock
+decides.
+
 ### Refresh is single-flight
 
 On a `401 expired_token` the SDK refreshes and replays the request. Concurrent 401s trigger

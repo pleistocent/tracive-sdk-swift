@@ -186,7 +186,13 @@ refuses to store the grant it just obtained.
 
 The SDK does **not** refresh pre-emptively on a locally computed expiry. Refresh is driven by the
 server's `401 expired_token`, because the server's clock is the one that decides; refreshing off a
-device clock that has drifted forward would burn a refresh-token rotation for nothing.
+device clock that has drifted forward would burn a refresh-token rotation for nothing — and each
+surplus rotation is another chance to present a retired token to reuse detection.
+
+Note what this means for the diagram below: there is no expiry decision anywhere in it. The stored
+token is sent whatever `expiresAt` says, including on the first request of a session where it has
+already passed. `TraciveTokens.isExpired(at:)` exists for a host app that wants to read the expiry
+itself; no path here calls it.
 
 ```mermaid
 flowchart TD

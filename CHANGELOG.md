@@ -266,8 +266,46 @@ source compatibility until the API freezes at 1.0.
   `absoluteString` directly would have seen `"%20%20%20"` and called it non-blank, accepting every
   blank the rule exists to catch.
 
+- **`TraciveTokens.isExpired(at:leeway:)` has lost its `leeway` parameter and is now
+  `isExpired(at:)`.** The method itself stays. Reading the stored expiry is a legitimate thing for a
+  host app to want — pre-warming a session before a burst of checks, or showing the state of a
+  connection in a settings screen — and what is being withdrawn is a knob, not the ability to look
+  at the data.
+
+  Nothing in the SDK ever called `isExpired`, with a leeway or without one. Expiry handling here has
+  always been purely reactive: the stored access token is sent, and on the server's
+  `401 expired_token` the SDK refreshes once, single-flight, and replays the request. A leeway is
+  only meaningful to something that acts *before* the deadline, so the parameter configured
+  behaviour this SDK has never performed — a public surface advertising a pre-emptive refresh that
+  an integrator reading it would reasonably assume was happening, and that was not.
+
+  Why it is not happening is a question of whose clock is being consulted. `expiresAt` is measured
+  against the *device's* clock, which the SDK neither controls nor can correct; a device running
+  fast reports tokens expired early, and one that is badly wrong reports them expired on arrival.
+  Refreshing off that estimate would rotate the refresh token far more often than the grant needs,
+  and since every rotation kills the token before it, each surplus rotation is one more chance for a
+  dead token to be presented — which the server's reuse detection is entitled to read as a
+  stolen-token replay and answer by revoking the entire grant. A wrong device clock would reach the
+  user as random sign-outs. The server's clock is the one that decides, so the SDK waits to be told.
+
+  **Source-breaking**, notwithstanding that the parameter carried a default: a call site that passed
+  `leeway:` no longer compiles, and 0.x has no deprecation period to soften it. Behaviour is
+  unchanged for everyone else — `isExpired(at:)` returns exactly what `isExpired(at:leeway: 0)`
+  returned, boundary included.
+
+  All four Tracive SDKs are standardising on this single reactive strategy. This one already
+  implemented it and only its public surface disagreed, which makes the change here an honesty fix
+  rather than a behavioural one.
+
 ### Internal
 
+- The reactive refresh is now pinned at its coldest point: a session whose **first** request carries
+  a stored token that expired while the app was closed. Every other refresh test began from a token
+  the session had already used successfully, so the case with nothing standing in front of it was
+  the one case unasserted — and in a sibling SDK a pre-emptive expiry check meant that request never
+  reached the server with a dead token at all. It passed on the first run, unchanged: the test
+  records existing behaviour rather than accompanying a fix. `isExpired(at:)` also gains direct
+  coverage of its boundary, which it previously had none of.
 - CI can now fail where it previously could not: it builds for iOS (so `UIKitAppLauncher` is
   compiled at all), enforces the Swift 6 language mode and `-strict-concurrency=complete` with
   warnings as errors, and checks the dependency-free guarantee against the manifests themselves —
