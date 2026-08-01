@@ -50,7 +50,7 @@ source compatibility until the API freezes at 1.0.
 
 ### Changed
 
-- `query-grammar-vectors.json` updated to **version 3**: 34 vectors and 11 rejection cases. The
+- `query-grammar-vectors.json` updated to **version 4**: 34 vectors and 11 rejection cases. The
   `nfcScope` note now states correctly that NFC applies to *every* code field, the bank code
   included, and a new `bank-code-nfc-composes-before-uppercasing` vector pins it — composition there
   is length-changing, so an implementation that skipped it would build keys that can never match.

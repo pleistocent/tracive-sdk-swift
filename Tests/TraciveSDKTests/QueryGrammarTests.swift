@@ -193,7 +193,7 @@ final class QueryGrammarTests: XCTestCase {
   func testFixtureIsTheExpectedContract() throws {
     let fixture = try loadFixture()
 
-    XCTAssertEqual(fixture.version, 3, "fixture schema version changed — re-read the rules")
+    XCTAssertEqual(fixture.version, 4, "fixture schema version changed — re-read the rules")
 
     // Pinned counts, not just non-emptiness. The fixture is vendored byte-identically into every
     // SDK; a vector silently dropped during a re-vendor would otherwise leave this suite green
