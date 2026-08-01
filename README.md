@@ -107,7 +107,9 @@ switch await client.authorize() {
 case .authorized(let grantedScopes):
   break
 case .appNotInstalled:
-  // The SDK has already opened the install link. Ask the user to come back and retry.
+  // The SDK has already opened the install link — https://tracive.chottu.link/install,
+  // carrying no OAuth parameters. Ask the user to come back and retry; there is no
+  // deferred resume.
   return
 case .denied:
   return

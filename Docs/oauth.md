@@ -60,10 +60,20 @@ Your app must declare the scheme, or `canOpenURL` returns `false` for everyone:
 ```
 
 When Tracive is not installed the SDK opens the **clean** install link and returns
-`AuthResult.appNotInstalled`. Clean means exactly that: no `client_id`, no `state`, no
-`code_challenge`, no `redirect_uri`. An attribution tag naming the partner is allowed; OAuth
-parameters are not, because they would be handed to the App Store, then to a fresh install, through
-channels nobody controls.
+`AuthResult.appNotInstalled`:
+
+```
+https://tracive.chottu.link/install?utm_source=tracive-sdk-ios&ref=<your client id>
+```
+
+Both query parameters are optional and neither is sensitive: `ref` is your OAuth client id — your
+identifier, never the end user's — and is omitted if you have none; `utm_source` names the SDK.
+Every Tracive SDK opens this same link, differing only in `utm_source`.
+
+Clean means exactly that: no `client_id`, no `state`, no `code_challenge`, no `code_verifier`, no
+`partner_user_id`, no `redirect_uri`, no `scope`. An attribution tag naming the partner is allowed;
+OAuth parameters are not, because the link transits a third-party link service on its way to the
+App Store and then to a fresh install, through channels nobody controls.
 
 **There is no deferred resume.** After installing, the user comes back to your app and taps again.
 Give that a real UI path — a dead end here is the single most common way an integration silently

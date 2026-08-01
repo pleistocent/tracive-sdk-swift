@@ -9,6 +9,15 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **The install link pointed at a host with no path.** `TraciveAppPresence.installURL(clientId:)`
+  built `https://tracive.chottu.link` instead of `https://tracive.chottu.link/install`, so the one
+  thing the SDK does for a user who does not have Tracive installed — open the download funnel and
+  stop — sent them to a URL that is not the install page. The only test covering the link asserted
+  `url.host` alone, which the wrong link satisfied, so it stayed green. The path is now part of the
+  link and the test pins the whole URL, query parameters included. The link still carries no OAuth
+  parameter of any kind: it transits a third-party link service, and `state`, `code_challenge`,
+  `code_verifier`, `partner_user_id`, `redirect_uri` and `scope` may never be handed to one.
+
 - **Query folding now mirrors JavaScript's whitespace semantics, not Foundation's.** Every fold used
   `trimmingCharacters(in: .whitespacesAndNewlines)` (and `Character.isWhitespace` for bank
   accounts), which disagrees with the backend's JS in *both* directions: it strips U+200B, which JS

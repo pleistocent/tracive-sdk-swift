@@ -62,23 +62,29 @@ public enum TraciveAppPresence {
 
   /// The **clean** install link (step 3).
   ///
-  /// It carries no OAuth parameters at all — no `state`, no `code_challenge`, no `redirect_uri`.
-  /// That is a privacy requirement, not tidiness: chottu is a third-party service, and routing
-  /// consent parameters through a processor is exactly what the contract rules out for production. An
-  /// attribution tag naming the *client* is explicitly allowed, so `ref` carries the OAuth client
-  /// id — the partner's own identifier, never the end user's.
+  /// `https://tracive.chottu.link/install`, with two optional, non-sensitive query parameters:
+  /// `ref` (the OAuth client id, omitted when nil or empty) and `utm_source`. The path is part of
+  /// the link — the bare host does not resolve to the install page.
+  ///
+  /// It carries no OAuth parameters at all — no `state`, no `code_challenge`, no `code_verifier`,
+  /// no `partner_user_id`, no `redirect_uri`, no `scope`. That is a privacy requirement, not
+  /// tidiness: the link transits a third-party link service, and routing consent parameters through
+  /// one is exactly what the contract rules out. An attribution tag naming the *client* is
+  /// explicitly allowed, so `ref` carries the OAuth client id — the partner's own identifier, never
+  /// the end user's.
   ///
   /// There is no deferred resume. The user installs Tracive and retries in the partner app; a
   /// consent request only lives ten minutes server-side, which a download plus registration will
   /// always outlast.
   public static func installURL(clientId: String?) -> URL {
-    var components = URLComponents(string: "https://tracive.chottu.link")!
+    let base = "https://tracive.chottu.link/install"
+    var components = URLComponents(string: base)!
     var items = [URLQueryItem(name: "utm_source", value: "tracive-sdk-ios")]
     if let clientId, !clientId.isEmpty {
       items.append(URLQueryItem(name: "ref", value: clientId))
     }
     components.queryItems = items
-    return components.url ?? URL(string: "https://tracive.chottu.link")!
+    return components.url ?? URL(string: base)!
   }
 
   /// The default launcher for the current platform.

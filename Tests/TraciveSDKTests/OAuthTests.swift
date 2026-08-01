@@ -207,22 +207,49 @@ final class OAuthTests: XCTestCase {
     // The OAuth flow never starts: no authorize URL is opened and no request is sent.
     XCTAssertFalse(launcher.opened[0].absoluteString.contains("code_challenge"))
     XCTAssertEqual(transport.callCount, 0)
+    // And what it opened is the agreed install link itself, not merely something clean.
+    XCTAssertEqual(
+      launcher.opened[0].absoluteString,
+      "https://tracive.chottu.link/install?utm_source=tracive-sdk-ios&ref=test-client"
+    )
   }
 
   func testInstallLinkIsCleanOfEveryOAuthParameter() {
     let url = TraciveAppPresence.installURL(clientId: "test-client")
     let query = Self.queryItems(of: url)
 
-    // Routing consent parameters through a third-party processor is forbidden. An attribution tag
-    // naming the *client* is explicitly allowed; nothing about the user or the flow is.
+    // Routing consent parameters through a third-party link service is forbidden. An attribution
+    // tag naming the *client* is explicitly allowed; nothing about the user or the flow is.
     for forbidden in [
-      "state", "code_challenge", "code_challenge_method", "redirect_uri", "client_id",
-      "partner_user_id", "scope", "response_type", "code",
+      "state", "code_challenge", "code_challenge_method", "code_verifier", "redirect_uri",
+      "client_id", "partner_user_id", "scope", "response_type", "code",
     ] {
       XCTAssertNil(query[forbidden], "Install link must not carry \(forbidden).")
     }
     XCTAssertEqual(query["ref"], "test-client")
-    XCTAssertEqual(url.host, "tracive.chottu.link")
+    XCTAssertEqual(query["utm_source"], "tracive-sdk-ios")
+  }
+
+  /// The whole link, not just its host.
+  ///
+  /// This previously asserted `url.host` alone, and stayed green while the builder emitted the bare
+  /// host with **no path at all** — `https://tracive.chottu.link`, which is not the install page.
+  /// Every user who did not have Tracive installed would have been sent somewhere that could not
+  /// install it, and the one test covering the link reported success. The path is load-bearing, so
+  /// it is pinned here character for character, as is the parameter set every Tracive SDK shares.
+  func testInstallLinkIsTheAgreedURLIncludingItsPath() {
+    XCTAssertEqual(
+      TraciveAppPresence.installURL(clientId: "test-client").absoluteString,
+      "https://tracive.chottu.link/install?utm_source=tracive-sdk-ios&ref=test-client"
+    )
+
+    // Both query parameters are optional; an absent client id drops `ref` and nothing else.
+    for missing in [nil, ""] as [String?] {
+      XCTAssertEqual(
+        TraciveAppPresence.installURL(clientId: missing).absoluteString,
+        "https://tracive.chottu.link/install?utm_source=tracive-sdk-ios"
+      )
+    }
   }
 
   func testPresenceProbeUsesTheEnvironmentScheme() {
