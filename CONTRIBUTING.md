@@ -131,6 +131,47 @@ the user's credentials. `AuthLauncher` has exactly one opening method for that r
 
 ---
 
+---
+
+## Differences from the sibling SDKs that are deliberate
+
+Two separate audits have now raised these as findings. They are decisions, and this list exists so a
+third does not spend its budget re-deriving them. Anything that differs across the four SDKs and is
+**not** on this list is drift, and worth reporting.
+
+- **There is no `close()` here, and Kotlin and Flutter have one.** Theirs release an HTTP connection
+  pool that has to be let go of explicitly. SQLite closes on `deinit` and `URLSession` needs no
+  shutdown of ours. A no-op `close()` here would teach a reader that calling it matters.
+
+- **`cacheInitializationError` is Swift-only, and belongs here.** This is the only SDK that opens a
+  default cache itself and degrades to `NoOpCheckCache` when it cannot, so it is the only one with a
+  failure to report. Kotlin opens nothing (`DisabledCheckCache` until a host passes one), Flutter
+  rethrows per operation, React Native surfaces a read fault as `cache_read_failed`. None of them
+  swallows it.
+
+- **`onAuthResult` and `startLinkListener` are React Native-only.** Android delivers the redirect as
+  an intent and iOS as `onOpenURL`; React Native has neither, so its SDK owns the `Linking`
+  subscription. Nothing to mirror here.
+
+- **The client fronts consent in all four now.** `authorize`, `handleCallback`, `isAuthorized` and
+  `clearCache` sit on the client everywhere, delegating to the OAuth flow. Kotlin gained them last;
+  they were added rather than removed from the other three because the surface had already shipped
+  to partners.
+
+- **A 401 naming something other than the bearer still costs one refresh.** The rule is: the
+  terminal codes surface, everything else refreshes once and replays. A hypothetical
+  `invalid_api_key` would therefore spend a refresh — which buys nothing, and costs nothing either,
+  because there is no API key in this SDK to be invalid and the second 401 surfaces. Narrowing the
+  trigger to one exact code is the change that would actually hurt: a bare 401 from a gateway or a
+  reverse proxy carries no code at all, and that is the case the rule exists for.
+
+- **The spent-refresh-token history is not persisted.** It dies with the process, on purpose —
+  `TraciveOAuth.spentRefreshTokens` says what that costs (one re-consent after a rolled-back store)
+  and why paying it beats writing dead refresh tokens to disk forever.
+
+- **The pending-authorization window is not configurable here.** Flutter and React Native expose it;
+  this SDK and Swift keep it private, so there is exactly one place the number lives.
+
 ## Tests
 
 No unit test opens a socket, touches the Keychain of a real device, or launches a browser. Every

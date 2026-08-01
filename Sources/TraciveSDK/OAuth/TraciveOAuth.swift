@@ -114,6 +114,14 @@ public actor TraciveOAuth {
   /// keeps a copy of the grant and writes it back.
   ///
   /// Emptied whenever the grant is dropped, so a fresh consent starts from a clean slate.
+  ///
+  /// **Deliberately in memory only: it dies with the process, and is not persisted.** What it would
+  /// buy is protection across a restart — a store rolled back by a device-backup restore holds a
+  /// refresh token this SDK already spent, and after a cold start there is nothing here to
+  /// recognise it. That case ends at the server, which sees the reuse and revokes the grant, so the
+  /// user re-consents once. Buying it back would mean writing dead refresh tokens to the Keychain:
+  /// more credential-shaped strings on disk, permanently, to spare a rare and recoverable prompt.
+  /// Not worth it. All four SDKs make the same call.
   private var spentRefreshTokens: [String] = []
 
   /// How many spent refresh tokens to remember: eight, the same number in every Tracive SDK.
