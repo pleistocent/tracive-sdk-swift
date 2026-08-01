@@ -167,24 +167,48 @@ source compatibility until the API freezes at 1.0.
   documents for scope strings the SDK never requests, and it does not know prose from example.)
 - `signOut()` is documented as **not** clearing the check cache, with the shared-device consequence
   spelled out, and `TraciveClient.init` is documented as doing blocking disk and Keychain I/O.
-- **A blank `installURL` override is now specified, and tested, as never being replaced by the
-  default.** No behaviour changes: `TraciveOAuth` already kept whatever non-`nil` URL it was given,
-  and only `nil` ever selected the default. What was missing was that this is a *decision* — the
-  sibling SDKs split on it, one trimming a blank override and falling back — and nothing recorded
-  or defended it here, so a well-meant "treat blank as absent" tidy-up could have landed as an
-  obvious improvement.
+- **A blank `installURL` override is now rejected at construction, and `TraciveOAuth.init` throws.**
+  Three cases, shared by all four Tracive SDKs: `nil` (or the parameter omitted) selects the
+  default install link exactly as before; a blank — whitespace-only — override throws `TraciveError`
+  with `serverCode == "blank_install_url"`; anything else is used verbatim.
 
-  The position: substituting the default for a partner's explicit blank value makes a
-  misconfiguration *work*. A plausible page opens, the unread environment variable or empty build
-  setting survives review and ships, and it stays invisible until the partner needs their own
-  install funnel and cannot explain why Tracive's link keeps appearing. Keeping the value fails
-  immediately, visibly, and as the partner's own failure. The initialiser documents this, and three
-  tests pin it — verified capable of failing by introducing the fallback and watching them go red.
+  **Source-breaking**, and knowingly so: every direct `TraciveOAuth(…)` call site needs `try`. Two
+  things make that the right trade. The break is total and mechanical — the compiler names every
+  site and the fix is one keyword — and the package is 0.1.0 and unreleased, so no partner has
+  written the old call yet. It will never be cheaper to make than it is now.
 
-  One trap comes with the `URL?` type and is documented rather than fixed: `URL(string:)` answers
-  `nil` for an empty string, so a partner funnelling an unvalidated configuration value through it
-  hands the SDK a `nil` indistinguishable from passing nothing, and does get the default. Only the
-  call site can tell those apart.
+  `TraciveClient` is untouched and still does **not** throw. It builds its own OAuth driver through
+  an internal factory that supplies no override, so it has nothing that could be blank — an
+  integrator who never heard of install links cannot be made to write `try` by a rule about them.
+
+  This reverses the position recorded earlier in this same unreleased section, which was to keep a
+  blank override and let the install funnel try to open it. That reasoning — that substituting our
+  link for a partner's explicit value makes a misconfiguration *work* — still holds, and rejecting
+  is not a retreat from it: the value is not replaced, it is refused. What changed is the evidence
+  about *when* the partner finds out. A sibling SDK measured what a passed-through blank actually
+  becomes downstream: `"?ref=…&utm_source=…"`, a schemeless string no operating system will open,
+  neither our link nor theirs. The failure it produces surfaces late and only for a user without
+  the Tracive app installed — the rarest path in the flow, and the one nobody instruments. Refusing
+  at construction fails once, in the host app's own code, on every run, in development, before an
+  end user is anywhere near it. Same principle, a failure several months earlier.
+
+  It is **not** URL validation, and the tests say so with a deliberately silly list: a scheme no
+  phone can open, a bare word, a link with a space on the end — all preserved byte for byte,
+  including their whitespace, so nothing here trims or rebuilds what it was handed. The SDK cannot
+  distinguish an enterprise distribution host or a regional store from a typo, and refusing a link
+  that works is the worse error.
+
+  The reason token is asserted as a string literal rather than through a constant, because it is a
+  cross-SDK contract: renaming a Swift constant must fail this test rather than quietly redefine
+  what four SDKs report.
+
+  One trap comes with the `URL?` type and is documented rather than fixed: `URL(string: "")` is
+  `nil`, so an empty configuration string cannot reach the initialiser as a URL at all — it arrives
+  as a `nil` indistinguishable from passing nothing, and takes the default. Only the call site can
+  tell those apart. Whitespace is what does survive the conversion, and it is what the rule catches;
+  note that `URL` percent-encodes it, so the check decodes before it trims — trimming
+  `absoluteString` directly would have seen `"%20%20%20"` and called it non-blank, accepting every
+  blank the rule exists to catch.
 
 ### Internal
 

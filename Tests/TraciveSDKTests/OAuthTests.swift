@@ -258,61 +258,126 @@ final class OAuthTests: XCTestCase {
   private static let defaultInstallLink =
     "https://tracive.chottu.link/install?utm_source=tracive-sdk-ios&ref=test-client"
 
-  /// A blank override is kept, not quietly replaced by the SDK's own link.
+  /// A blank override is refused at construction, with the shared reason token.
   ///
-  /// The sibling SDKs disagreed here: one trims a blank install-URL override and falls back to its
-  /// default, and one refuses to. This SDK takes the second position, and these tests are what make
-  /// it a decision rather than an accident of the type signature.
+  /// The four Tracive SDKs converged on this rule, and this is the Swift half of it: `nil` means
+  /// "no override" and takes the default, a blank override is rejected, and any non-blank value is
+  /// used verbatim.
   ///
-  /// The reasoning is about which failure a partner can act on. A blank override is a
-  /// configuration bug — an unread environment variable, an empty build setting — and substituting
-  /// the default makes it *work*, in the sense that a plausible page opens. The bug then survives
-  /// review, ships, and stays invisible until the day the partner needs their own install funnel
-  /// (a regional store, an enterprise distribution) and cannot understand why Tracive's link keeps
-  /// appearing. Keeping the blank value fails immediately and visibly, at the one moment the
-  /// partner is looking at their own configuration, and what failed is their value rather than
-  /// ours.
+  /// Why rejecting beats passing it through. A sibling SDK measured what a blank override actually
+  /// produces once it reaches the install funnel: `"?ref=…&utm_source=…"` — a schemeless string no
+  /// operating system will open. It is neither the default nor the partner's link, and the only
+  /// signal it ever generates arrives much later and only for a user who does *not* have the
+  /// Tracive app installed, which is the rarest path in the flow and the one nobody watches.
+  /// Refusing at construction fails once, in the host app's own code, on every run, in
+  /// development, before an end user is anywhere near it.
   ///
-  /// `URL(string: " ")` is a whitespace-only URL — no scheme, no host — which is as blank as a
-  /// non-nil `URL` gets.
-  func testABlankInstallURLOverrideIsNotSwappedForTheDefault() {
-    let blank = URL(string: " ")!
-    let oauth = makeOAuth(installURL: blank)
+  /// The reason token is asserted as a literal rather than through a constant on purpose: it is a
+  /// cross-SDK contract now, so renaming the constant must fail this test instead of quietly
+  /// redefining what all four SDKs report.
+  ///
+  /// Whitespace is the only blankness a `URL` can carry — see
+  /// `testAnEmptyStringCannotEvenReachTheInitialiserAsAURL` for why.
+  func testABlankInstallURLOverrideIsRejectedAtConstruction() throws {
+    for blank in ["   ", "\t", "\n", " \t\n "] {
+      let url = try XCTUnwrap(URL(string: blank), "\(String(reflecting: blank)) should be a URL")
 
-    XCTAssertEqual(oauth.installURL, blank)
-    XCTAssertNotEqual(oauth.installURL.absoluteString, Self.defaultInstallLink)
+      XCTAssertThrowsError(
+        try TraciveOAuth(configuration: makeOAuthConfiguration(), installURL: url),
+        "a whitespace-only override must not be accepted: \(String(reflecting: blank))"
+      ) { error in
+        XCTAssertEqual((error as? TraciveError)?.serverCode, "blank_install_url")
+      }
+    }
   }
 
-  /// And the flow opens that blank value, rather than reaching for the default at the last moment.
+  /// `nil` — and only `nil` — means "no override", and still selects the default.
   ///
-  /// Asserted separately from the property above because a fallback could live in either place, and
-  /// one in `authorize()` would leave the property honest while the behaviour was not.
-  func testTheBlankOverrideIsWhatTheInstallFunnelOpens() async {
-    let blank = URL(string: " ")!
+  /// Absence is a real answer, and it is the answer almost every integrator gives: the parameter
+  /// has a default, so a host app that never heard of it must keep working unchanged.
+  func testOnlyNilInstallURLMeansNoOverride() throws {
+    let oauth = try TraciveOAuth(configuration: makeOAuthConfiguration(), installURL: nil)
+    XCTAssertEqual(oauth.installURL.absoluteString, Self.defaultInstallLink)
+  }
+
+  /// The trap in the parameter's type, which is why the rule can only ever catch whitespace.
+  ///
+  /// `URL(string: "")` is `nil`, so an empty configuration string cannot reach the initialiser as a
+  /// URL at all — it arrives as a `nil` indistinguishable from passing nothing, and takes the
+  /// default. Only the call site can tell those two apart. What *can* reach us is whitespace:
+  /// `URL(string: "   ")` is a non-nil URL whose `absoluteString` is the percent-encoded
+  /// `"%20%20%20"`, which is also why the check has to decode before it trims.
+  func testAnEmptyStringCannotEvenReachTheInitialiserAsAURL() throws {
+    XCTAssertNil(URL(string: ""), "An empty string cannot become a URL, so it arrives here as nil.")
+
+    let whitespace = try XCTUnwrap(URL(string: "   "))
+    XCTAssertEqual(whitespace.absoluteString, "%20%20%20")
+    XCTAssertFalse(
+      whitespace.absoluteString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      "trimming the raw absoluteString cannot see this blank — the check must decode first"
+    )
+  }
+
+  /// **This is not URL validation.** Any non-blank value is kept exactly as given.
+  ///
+  /// Every value below is wrong in some way a partner might plausibly ship — no scheme, a scheme
+  /// no phone can open, a bare word, whitespace around a real value — and every one of them must
+  /// survive untouched. The rule rejects blankness and nothing else; widening it into "is this a
+  /// sensible install link?" would start refusing links that work (an enterprise distribution
+  /// host, a regional store, a partner's own shortener) for the sake of catching mistakes the SDK
+  /// is in no position to recognise.
+  ///
+  /// Two of these carry more weight than the rest. The whitespace-padded pair proves the SDK
+  /// neither trims nor rebuilds the value it was handed — the padding is still there afterwards.
+  /// Verified capable of failing: an implementation that percent-decodes, trims and rebuilds the
+  /// override turns both of them into something else and this test goes red. And
+  /// `"?ref=…&utm_source=…"` is the exact string a sibling SDK measured a passed-through blank
+  /// turning into; here it is a value a partner supplied deliberately, so it is non-blank, so it
+  /// is kept. Rejecting *that* would be URL validation, which this is not.
+  func testANonBlankOverrideIsUsedVerbatimHoweverOddItLooks() throws {
+    let odd = [
+      "https://install.partner.example/regional",
+      "gopher://example.invalid/nope",
+      "howdy",
+      "https://install.partner.example/padded ",
+      " howdy ",
+      "?ref=partner&utm_source=partner-app",
+    ]
+
+    for candidate in odd {
+      let url = try XCTUnwrap(URL(string: candidate), "\(candidate) should be a URL")
+      let oauth = try TraciveOAuth(configuration: makeOAuthConfiguration(), installURL: url)
+
+      XCTAssertEqual(oauth.installURL, url, "\(candidate) must survive verbatim")
+      XCTAssertNotEqual(oauth.installURL.absoluteString, Self.defaultInstallLink)
+    }
+  }
+
+  /// And a non-blank override is what the install funnel actually opens.
+  ///
+  /// Asserted separately from the property above because a fallback could live in either place,
+  /// and one in `authorize()` would leave the property honest while the behaviour was not.
+  func testTheNonBlankOverrideIsWhatTheInstallFunnelOpens() async throws {
+    let override = try XCTUnwrap(URL(string: "https://install.partner.example/regional"))
     let launcher = FakeAppLauncher(canOpenAnything: false)
-    let oauth = makeOAuth(launcher: launcher, installURL: blank)
+    let oauth = makeOAuth(launcher: launcher, installURL: override)
 
     let result = await oauth.authorize()
 
     XCTAssertEqual(result.testDescription, "appNotInstalled")
-    XCTAssertEqual(launcher.opened, [blank])
-    XCTAssertFalse(
-      launcher.opened.contains { $0.absoluteString == Self.defaultInstallLink },
-      "A blank override must not be silently upgraded to Tracive's own install link."
-    )
+    XCTAssertEqual(launcher.opened, [override])
   }
 
-  /// The other half of the contract: `nil` — and only `nil` — means "no override".
+  /// A host app that never touched this parameter cannot start failing.
   ///
-  /// Worth pinning because of a trap in the parameter's type. `URL(string:)` answers `nil` for an
-  /// empty string, so a partner who funnels an unvalidated configuration value through it hands the
-  /// SDK a `nil` that is indistinguishable from passing nothing, and does get the default. The
-  /// parameter documentation says so; this records what the SDK can actually see.
-  func testOnlyNilInstallURLMeansNoOverride() {
-    let oauth = makeOAuth(installURL: nil)
-    XCTAssertEqual(oauth.installURL.absoluteString, Self.defaultInstallLink)
+  /// `TraciveClient.init` builds the OAuth driver itself and supplies no override, so it has
+  /// nothing that could be blank. It stays non-throwing, and the driver it builds still carries the
+  /// default install link.
+  func testTraciveClientStillBuildsItsOAuthDriverWithoutThrowing() throws {
+    let client = makeClient(transport: FakeHTTPTransport { _, _ in .ok(json: "{}") })
 
-    XCTAssertNil(URL(string: ""), "An empty string cannot become a URL, so it arrives here as nil.")
+    let oauth = try XCTUnwrap(client.oauth)
+    XCTAssertEqual(oauth.installURL.absoluteString, Self.defaultInstallLink)
   }
 
   func testPresenceProbeUsesTheEnvironmentScheme() {
@@ -1045,6 +1110,23 @@ final class OAuthTests: XCTestCase {
 
 // MARK: - OAuth test doubles
 
+/// The configuration every OAuth fixture in this file is built from.
+///
+/// Factored out of `makeOAuth` so the tests that drive the *initialiser's* failure can construct
+/// `TraciveOAuth` directly, with the same client id the rest of the suite uses.
+func makeOAuthConfiguration(
+  clientType: ClientType = .public,
+  scopes: [String] = ["scammer.check", "credits.read"]
+) -> OAuthConfiguration {
+  OAuthConfiguration(
+    clientId: "test-client",
+    redirectUri: URL(string: "https://partner.example.com/tracive/callback")!,
+    scopes: scopes,
+    partnerUserId: "partner-user-1",
+    clientType: clientType
+  )
+}
+
 func makeOAuth(
   transport: FakeHTTPTransport = FakeHTTPTransport { _, _ in HTTPResponse(status: 200) },
   tokenStore: (any TraciveTokenStore)? = nil,
@@ -1055,14 +1137,13 @@ func makeOAuth(
   scopes: [String] = ["scammer.check", "credits.read"],
   installURL: URL? = nil
 ) -> TraciveOAuth {
-  TraciveOAuth(
-    configuration: OAuthConfiguration(
-      clientId: "test-client",
-      redirectUri: URL(string: "https://partner.example.com/tracive/callback")!,
-      scopes: scopes,
-      partnerUserId: "partner-user-1",
-      clientType: clientType
-    ),
+  // `try!` rather than propagating: the initialiser's only failure is a blank `installURL`
+  // override, and no caller of this helper passes one. Making the helper throw would put `try` on
+  // forty call sites that have nothing to do with install links, and the tests that *do* exercise
+  // the rejection construct the actor directly — so the throw is the subject of a test rather than
+  // a crash hidden inside a fixture.
+  try! TraciveOAuth(
+    configuration: makeOAuthConfiguration(clientType: clientType, scopes: scopes),
     environment: environment,
     transport: transport,
     tokenStore: tokenStore ?? InMemoryTokenStore(),

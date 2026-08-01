@@ -81,19 +81,43 @@ converts at zero.
 
 ### Overriding the install link
 
-`TraciveOAuth.init(…, installURL:)` takes your own link. `nil` — and only `nil` — means "no
-override" and selects the default above.
+`TraciveOAuth.init(…, installURL:)` takes your own link, and **it throws**:
 
-**A blank override is used as given, not replaced by the default.** Hand it a whitespace-only or
-otherwise unopenable URL and that is precisely what the funnel tries to open, and fails to. That is
-deliberate: silently substituting our link for your explicit value makes a configuration bug *work*,
-so an unread environment variable or an empty build setting passes review, ships, and only surfaces
-the day you need your own funnel and cannot explain why Tracive's link keeps appearing. Failing at
-once, on your value, is the cheaper failure.
+```swift
+let oauth = try TraciveOAuth(
+  configuration: configuration,
+  installURL: URL(string: "https://install.yourbank.example/tracive")
+)
+```
 
-One caveat that belongs to the type rather than the SDK: `URL(string:)` returns `nil` for an empty
-string. Converting an unvalidated configuration value with it hands the SDK a `nil` it cannot tell
-from "no override" — so check the string first if that distinction matters to you.
+Three cases, and every Tracive SDK now applies the same three:
+
+| You pass | What happens |
+|---|---|
+| nothing, or `nil` | the default link above. Absence is a real answer, and the common one. |
+| a blank (whitespace-only) URL | **throws** `TraciveError`, `serverCode == "blank_install_url"` |
+| anything else | used verbatim, untouched |
+
+**A blank override is refused at construction.** It is never a considered choice — it is an unread
+environment variable or an empty build setting — and passing it through produces a schemeless string
+no operating system will open, which is neither our link nor yours. Whatever the SDK did with it,
+the only signal would reach you much later and only for a user who does *not* have Tracive
+installed: the rarest path in the flow, and the one nobody watches. Throwing here fails once, in
+your own code, on every run, in development, before an end user is involved.
+
+**This is not URL validation.** A wrong-but-non-blank link passes through untouched — a scheme no
+phone can open, a bare word, a link with a space on the end. The SDK cannot tell an enterprise
+distribution host or a regional store from a typo, and refusing a link that works would be the
+worse mistake. Blankness is the one thing it will not accept.
+
+If you would rather not write `try`, don't pass the parameter: `TraciveClient` builds its own OAuth
+driver and never supplies an override, so `TraciveClient.init` does not throw.
+
+One caveat belongs to the type rather than the SDK: `URL(string:)` returns `nil` for an empty
+string, so an empty configuration value cannot reach the SDK as a URL at all — it arrives as a `nil`
+indistinguishable from "no override", and takes the default. Only your call site can tell those
+apart, so check the string before you convert it if the distinction matters. Whitespace is what
+survives the conversion, and whitespace is what this rule catches.
 
 ## Never a `WKWebView`
 

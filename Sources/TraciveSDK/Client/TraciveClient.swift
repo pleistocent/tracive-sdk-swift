@@ -154,7 +154,11 @@ public actor TraciveClient {
     if let oauth {
       self.oauth = oauth
     } else if let oauthConfiguration = mode.oauthConfiguration {
-      self.oauth = TraciveOAuth(
+      // `TraciveOAuth.init` throws on a blank `installURL` override, and there is no override to
+      // be blank here — this client exposes no such parameter. The factory says so in the type
+      // rather than in a comment, which is what keeps this initialiser non-throwing: an integrator
+      // who never heard of install links cannot be made to write `try` by a rule about them.
+      self.oauth = TraciveOAuth.withDefaultInstallURL(
         configuration: oauthConfiguration,
         environment: environment,
         transport: resolvedTransport,

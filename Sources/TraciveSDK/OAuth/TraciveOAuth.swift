@@ -44,7 +44,8 @@ public actor TraciveOAuth {
   /// The clean install link opened when Tracive is missing. Carries no OAuth parameters.
   ///
   /// Whatever was passed to `init(…, installURL:)`, verbatim, or the per-client default when that
-  /// was `nil`. A blank override is *not* rewritten — see the initialiser.
+  /// was `nil`. It can never be blank: the initialiser refuses a blank override rather than
+  /// storing one — see there.
   public nonisolated let installURL: URL
 
   private let transport: any HTTPTransport
@@ -88,23 +89,33 @@ public actor TraciveOAuth {
   ///   - installURL: where a user without the Tracive app is sent. `nil` — and only `nil` — means
   ///     "no override", and selects the default clean install link for this client.
   ///
-  ///     **A blank override is used as given, not replaced by the default.** Pass a whitespace-only
-  ///     or otherwise unopenable URL and that is exactly what the install funnel will try to open,
-  ///     and fail to. This is deliberate, and it is the one place this SDK does not follow the
-  ///     "treat blank as absent" convention.
+  ///     **A blank override is refused, not passed through and not silently replaced.** Supply a
+  ///     whitespace-only URL and this initialiser throws `TraciveError` carrying the code
+  ///     `blank_install_url`. Every Tracive SDK now applies the same rule with the same token.
   ///
-  ///     The reasoning is about which failure a partner can act on. A blank override is a
-  ///     configuration bug — an unread environment variable, an empty build setting. Substituting
-  ///     the default makes that bug *work*: a plausible page opens, the mistake passes review and
-  ///     ships, and it stays invisible until the day the partner needs their own funnel (a regional
-  ///     store, an enterprise distribution) and cannot work out why Tracive's link keeps appearing
-  ///     instead. Keeping the value fails at once, while the partner is looking at their own
-  ///     configuration, and what fails is visibly their value rather than ours.
+  ///     This is **not** URL validation. Any non-blank value is used exactly as given, however
+  ///     unlikely it looks — a scheme no phone can open, a bare word, a link with whitespace
+  ///     around it. The SDK is in no position to judge whether an enterprise distribution host or
+  ///     a partner's own shortener is a sensible install link, and refusing one that works is a
+  ///     worse failure than accepting one that does not.
+  ///
+  ///     Blankness is the exception because of what a blank actually becomes downstream. It is
+  ///     never a considered choice — it is an unread environment variable or an empty build
+  ///     setting — and it produces a string no operating system will open, which is neither the
+  ///     default nor the partner's link. Whatever the SDK does with it, the only signal reaches
+  ///     the partner much later and only for a user who does *not* have Tracive installed: the
+  ///     rarest path in the flow, and the one nobody is watching. Refusing here fails once, in the
+  ///     host app's own code, on every run, during development, before an end user is involved.
   ///
   ///     Note the trap the `URL?` type sets: `URL(string:)` answers `nil` for an empty string, so
   ///     funnelling an unvalidated configuration value straight through it hands this initialiser a
-  ///     `nil` that is indistinguishable from passing nothing — and that does get the default.
-  ///     Check the string before converting it if the distinction matters to you.
+  ///     `nil` that is indistinguishable from passing nothing — and that does get the default. Only
+  ///     the call site can tell those apart, so check the string before converting it if the
+  ///     distinction matters to you. Whitespace is what does survive the conversion, and it is what
+  ///     this rule catches.
+  ///
+  /// - Throws: `TraciveError` with the code `blank_install_url` when `installURL` is non-`nil` and
+  ///   blank. Nothing else here can fail.
   public init(
     configuration: OAuthConfiguration,
     environment: TraciveEnvironment = .production,
@@ -115,6 +126,63 @@ public actor TraciveOAuth {
     clock: (any TraciveClock)? = nil,
     authorizationEndpoint: URL? = nil,
     installURL: URL? = nil
+  ) throws {
+    self.init(
+      configuration: configuration,
+      environment: environment,
+      transport: transport,
+      tokenStore: tokenStore,
+      appLauncher: appLauncher,
+      pkceGenerator: pkceGenerator,
+      clock: clock,
+      authorizationEndpoint: authorizationEndpoint,
+      // Resolved before delegation so the only failure this initialiser has happens before any
+      // stored property exists.
+      resolvedInstallURL: try Self.resolveInstallURL(
+        override: installURL,
+        clientId: configuration.clientId
+      )
+    )
+  }
+
+  /// The driver `TraciveClient` builds when the host app supplies none.
+  ///
+  /// Deliberately a factory rather than the public initialiser: that one throws, and the only thing
+  /// that can make it throw is a blank `installURL` override. This path supplies no override at
+  /// all, so it cannot fail — which is what keeps `TraciveClient.init` non-throwing for the
+  /// overwhelming majority of integrators, who never name this parameter.
+  static func withDefaultInstallURL(
+    configuration: OAuthConfiguration,
+    environment: TraciveEnvironment,
+    transport: (any HTTPTransport)?,
+    tokenStore: (any TraciveTokenStore)?,
+    clock: (any TraciveClock)?
+  ) -> TraciveOAuth {
+    TraciveOAuth(
+      configuration: configuration,
+      environment: environment,
+      transport: transport,
+      tokenStore: tokenStore,
+      appLauncher: nil,
+      pkceGenerator: nil,
+      clock: clock,
+      authorizationEndpoint: nil,
+      resolvedInstallURL: TraciveAppPresence.installURL(clientId: configuration.clientId)
+    )
+  }
+
+  /// The one initialiser that actually stores anything. `resolvedInstallURL` has already been
+  /// checked, so this cannot fail and every construction path funnels through it.
+  private init(
+    configuration: OAuthConfiguration,
+    environment: TraciveEnvironment,
+    transport: (any HTTPTransport)?,
+    tokenStore: (any TraciveTokenStore)?,
+    appLauncher: (any TraciveAppLauncher)?,
+    pkceGenerator: (any PKCEGenerating)?,
+    clock: (any TraciveClock)?,
+    authorizationEndpoint: URL?,
+    resolvedInstallURL: URL
   ) {
     self.configuration = configuration
     self.environment = environment
@@ -125,10 +193,39 @@ public actor TraciveOAuth {
     self.clock = clock ?? TraciveSystemClock()
     self.authorizationEndpoint =
       authorizationEndpoint ?? AuthorizeURLBuilder.defaultEndpoint(for: environment)
-    // `??` and nothing else, on purpose: no trim, no emptiness test. A partner's explicit value is
-    // kept however unusable it looks, so a misconfiguration fails as their own visible failure
-    // rather than being quietly papered over with Tracive's link. See the parameter documentation.
-    self.installURL = installURL ?? TraciveAppPresence.installURL(clientId: configuration.clientId)
+    self.installURL = resolvedInstallURL
+  }
+
+  /// Applies the shared rule: absent takes the default, blank is refused, anything else is kept
+  /// byte for byte.
+  private static func resolveInstallURL(override: URL?, clientId: String) throws -> URL {
+    guard let override else {
+      return TraciveAppPresence.installURL(clientId: clientId)
+    }
+    guard !isBlank(override) else {
+      throw TraciveError.sdk(
+        "blank_install_url",
+        "The installURL override is blank. Pass nil to use Tracive's own install link, or a real "
+          + "link of your own."
+      )
+    }
+    return override
+  }
+
+  /// Whether a `URL` carries no meaningful content at all.
+  ///
+  /// The percent-decode is not decoration. `URL` encodes whitespace on the way in, so
+  /// `URL(string: "   ")` has the `absoluteString` `"%20%20%20"` — nine characters, none of them
+  /// whitespace, which `trimmingCharacters` would call perfectly non-blank. Trimming the raw string
+  /// would therefore accept every blank this rule exists to catch. The string is what gets
+  /// inspected rather than any of `URL`'s components, because a whitespace-only URL has no scheme,
+  /// no host and no path to look at.
+  private static func isBlank(_ url: URL) -> Bool {
+    let raw = url.absoluteString
+    // A malformed escape sequence makes `removingPercentEncoding` answer `nil`; whatever that is,
+    // it is not blank, so falling back to the raw string is the safe reading.
+    let decoded = raw.removingPercentEncoding ?? raw
+    return decoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   // MARK: - State
