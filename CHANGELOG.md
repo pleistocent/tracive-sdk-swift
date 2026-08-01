@@ -100,6 +100,34 @@ source compatibility until the API freezes at 1.0.
   check free. Cancelling a check was never part of this SDK's documented contract and no test
   depended on it.
 
+- **The check latch ignored a caller's own `idempotencyKey`, so it collapsed checks the caller had
+  deliberately told it apart.** The latch key was the record key, the detail level and the locale;
+  the key you pass to `checkScammer` was not in it. Supplying one is an explicit statement about the
+  check, and leaving it out of the latch overrode that statement in two directions.
+
+  Two concurrent checks of one identifier carrying **different** keys are the caller saying "these
+  are two billable transactions". They were collapsed into one request, sent under whichever key
+  arrived first — so the second caller's transaction was one the server never saw, and only one of
+  the two answers the caller asked for was billed. And a caller who **supplied** a key could join a
+  flight started by one who did not, which silently costs them the retry budget: retrying a check is
+  permitted only when the *caller's* key is on it, so a check that was keyed precisely in order to
+  survive a 5xx or a timeout inherited the unkeyed flight's refusal to retry, with nothing to say
+  why. `generatedIdempotencyKey` already stated the neighbouring rule — a key the SDK invents must
+  never be derived from the query, since that would collapse two deliberate re-checks of one
+  identifier into one — and the latch was doing exactly that through another door.
+
+  **The caller's key now joins the latch key when there is one, and the key is unchanged when there
+  is not.** That keeps the case the latch exists for: a double-tapped button and a list rendering
+  one identifier in two cells both go through a single call site with a single set of options, so
+  they still share one request and one charge, keyed or not. Only two callers who distinguished
+  their transactions themselves now get two requests.
+
+  **The key the SDK generates for an unkeyed check stays out of the latch key**, deliberately. It is
+  unique per call, so including it would hand every check a latch of its own and switch the feature
+  off; the generated key exists to make the SDK's own post-refresh replay collapsible server-side
+  and nothing more. All four Tracive SDKs take this change together, so the latch collapses on the
+  same four components everywhere.
+
 - **A refresh that timed out left its refresh token in the store, and the next refresh sent it
   again — which is what makes a server revoke a grant.** The refresh token rotates, and presenting
   a rotated one is the exact pattern reuse detection looks for; the server's correct response is to

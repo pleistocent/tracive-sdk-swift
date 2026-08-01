@@ -41,8 +41,9 @@ import Foundation
 /// earlier can be stale by the time the check lands anyway.
 ///
 /// The type is an `actor`, but it never holds its executor across a network call, so several checks
-/// can be in flight at once. Two overlapping checks for the *same* identifier are the exception:
-/// they share one request and therefore one charge. See `latchedFetch`.
+/// can be in flight at once. Two overlapping checks asking the *same* question are the exception:
+/// they share one request and therefore one charge. "The same question" is the identifier, the
+/// detail level, the locale and your own idempotency key. See `latchedFetch`.
 public actor TraciveClient {
 
   // MARK: - Configuration
@@ -74,9 +75,10 @@ public actor TraciveClient {
 
   private let transport: any HTTPTransport
   private let clock: any TraciveClock
-  /// The checks currently on the wire, keyed on the record key plus the detail level and the
-  /// locale. This one map *is* the single-flight guarantee for billable checks; `latchedFetch`
-  /// says what it covers and what it deliberately does not.
+  /// The checks currently on the wire, keyed on the record key plus the detail level, the locale
+  /// and the caller's own idempotency key when there is one. This one map *is* the single-flight
+  /// guarantee for billable checks; `latchedFetch` says what it covers and what it deliberately
+  /// does not.
   private var inFlightChecks: [String: Task<CheckResult, Error>] = [:]
 
   // MARK: - Init
@@ -207,13 +209,17 @@ public actor TraciveClient {
   ///     and it is not a substitute for passing a key derived from your transaction if you want
   ///     retries or cross-process deduplication.
   ///
+  ///     Your key also keeps this check out of somebody else's shared flight: see below.
+  ///
   /// ## Overlapping identical checks are billed once
   ///
   /// While a check for one identifier is on the wire, a second check for that same identifier at
-  /// the same `detail` and `locale` joins it instead of sending a second request: both callers get
+  /// the same `detail` and `locale`, and carrying the same `idempotencyKey` — including the usual
+  /// case of neither carrying one — joins it instead of sending a second request: both callers get
   /// the one answer, and the partner pays for it once. A different identifier, a different detail
-  /// level or a different locale is a different question and goes out on its own. See
-  /// `latchedFetch` for why the key is all three, and for what happens to a cancelled caller.
+  /// level, a different locale or a different caller-supplied key is a different question and goes
+  /// out on its own. See `latchedFetch` for why the key is all four, and for what happens to a
+  /// cancelled caller.
   ///
   /// - Throws: `TraciveError`. Notable cases: `.cacheMiss` for `source == .cache` with no fresh
   ///   entry, `.insufficientCredits` for a 402 (handle it — do not pre-poll `credits()`),
@@ -451,6 +457,16 @@ public actor TraciveClient {
     "sdk-" + UUID().uuidString.lowercased()
   }
 
+  /// The key the *caller* supplied, or `nil` when they supplied none. An empty string is none.
+  ///
+  /// Three rules turn on this one answer — whether the check may be retried, which key goes on the
+  /// wire, and whether the check may share a flight with another — so they read it from here rather
+  /// than each re-deriving it. A caller passing `""` must not end up with a private latch that no
+  /// other unkeyed caller can meet on.
+  private static func callerIdempotencyKey(_ supplied: String?) -> String? {
+    supplied.flatMap { $0.isEmpty ? nil : $0 }
+  }
+
   /// Runs `fetchAndStore` **single-flight**, because here the unit is currency.
   ///
   /// Two overlapping checks for the same identifier both read the cache, both missed, both POSTed
@@ -461,13 +477,30 @@ public actor TraciveClient {
   /// `TraciveOAuth.refreshTokens` has had the right shape all along; this is the same latch in the
   /// one place where the cost of missing it is money rather than latency.
   ///
-  /// **The key is the record key plus the detail level plus the locale**, not the record key alone.
-  /// A `.minimal` result must never be handed to a caller who asked for `.full` — it carries no
-  /// `topChronologies` and no `comments`, which reads as "the server answered in full and there is
-  /// nothing on file" — and a `.full` answer in one language must never satisfy a request for
-  /// another, since `tags` and `disclaimer` come back in the language that was asked for. Only a
-  /// `.full` request sends a locale, so the empty string stands for "none sent" and cannot collide
-  /// with a real BCP-47 tag.
+  /// **The key is the record key plus the detail level, the locale, and the caller's own
+  /// idempotency key when there is one** — not the record key alone. A `.minimal` result must never
+  /// be handed to a caller who asked for `.full` — it carries no `topChronologies` and no
+  /// `comments`, which reads as "the server answered in full and there is nothing on file" — and a
+  /// `.full` answer in one language must never satisfy a request for another, since `tags` and
+  /// `disclaimer` come back in the language that was asked for. Only a `.full` request sends a
+  /// locale, so the empty string stands for "none sent" and cannot collide with a real BCP-47 tag.
+  ///
+  /// The caller's key is in there because supplying one is a statement of intent, and collapsing
+  /// across it overrides that statement in two directions. Two concurrent checks carrying
+  /// *different* caller keys are the caller saying "these are two billable transactions"; sharing
+  /// one flight makes them one, and it is the first caller's key that goes on the wire. And a
+  /// caller who supplied a key, joining a flight started by one who did not, silently loses the
+  /// retry budget — `isRetryable` keys off the caller's own key, so the flight it joined will not
+  /// retry a 5xx or a timeout however carefully it was keyed. `generatedIdempotencyKey` states the
+  /// neighbouring rule for the same reason: a key the SDK invents must never be derived from the
+  /// query, since that would collapse two deliberate re-checks of one identifier into one. The
+  /// latch did exactly that through another door.
+  ///
+  /// **A generated key is deliberately *not* in the latch key.** It is unique per call, so
+  /// including it would give every check a latch of its own and disable the feature outright.
+  /// Leaving it out is what keeps the case the latch exists for: a double-tapped button and a list
+  /// rendering one identifier in two cells both go through one call site with one set of options,
+  /// so they still share a flight and are still billed once.
   ///
   /// The lookup and the insert happen with no `await` between them, which is the whole point: the
   /// actor cannot interleave there, so a second caller either finds the flight above or starts the
@@ -509,7 +542,12 @@ public actor TraciveClient {
         cacheApplies: cacheApplies)
     }
 
-    let latchKey = "\(key.hex)|\(detail.rawValue)|\(locale ?? "")"
+    // The caller's key is appended only when there is one, so an unkeyed check produces exactly the
+    // key it always did and two unkeyed callers still meet on it. Normalised through the same
+    // helper `fetchAndStore` uses, so "the caller gave us a key" cannot mean one thing to the latch
+    // and another to the retry rule that key exists to unlock.
+    let base = "\(key.hex)|\(detail.rawValue)|\(locale ?? "")"
+    let latchKey = Self.callerIdempotencyKey(idempotencyKey).map { "\(base)|\($0)" } ?? base
     if let inFlight = inFlightChecks[latchKey] {
       return try await inFlight.value
     }
@@ -548,7 +586,7 @@ public actor TraciveClient {
       throw TraciveError.sdk("invalid_request_body", "The check request could not be encoded.")
     }
 
-    let callerKey = idempotencyKey.flatMap { $0.isEmpty ? nil : $0 }
+    let callerKey = Self.callerIdempotencyKey(idempotencyKey)
 
     // Every check carries an `Idempotency-Key`, whether the caller supplied one or not.
     //

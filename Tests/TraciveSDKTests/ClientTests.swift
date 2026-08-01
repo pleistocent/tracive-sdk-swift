@@ -1355,6 +1355,99 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
   }
 
+  /// A caller-supplied `idempotencyKey` says "this check is its own billable transaction", and the
+  /// latch used to override that: two concurrent checks of one identifier carrying *different*
+  /// caller keys were collapsed into a single request, sent under whichever key happened to arrive
+  /// first. The second caller's key never left the device, so the transaction it named was one the
+  /// server never saw — and the partner was billed for one of the two the caller asked for.
+  ///
+  /// This is the discriminating case for the latch key. It fails against the previous key, which
+  /// was the record key, the detail level and the locale and nothing else.
+  func testOverlappingChecksWithDifferentCallerKeysAreNotCollapsed() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, idempotencyKey: "txn-a")
+    } second: {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, idempotencyKey: "txn-b")
+    }
+
+    XCTAssertTrue(
+      sawASecondRequest,
+      "Two checks the caller deliberately distinguished by idempotency key shared one request."
+    )
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+    // And each goes out under its own key. Collapsing sent the first caller's key twice over.
+    XCTAssertEqual(Set(Self.checkIdempotencyKeys(transport)), ["txn-a", "txn-b"])
+  }
+
+  /// The same rule seen from the other side, and the reason the fix is "the caller's key" rather
+  /// than "whether there is a key": one key used twice is one transaction, so the two checks still
+  /// share a request and the partner still pays once. A latch that fragmented on the mere presence
+  /// of a key would disable itself for every keyed caller, and the unkeyed collapse pinned by
+  /// `testTwoOverlappingIdenticalChecksProduceOneBillableRequest` would not notice.
+  func testOverlappingChecksWithTheSameCallerKeyAreStillCollapsed() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, idempotencyKey: "txn-same")
+    } second: {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, idempotencyKey: "txn-same")
+    }
+
+    XCTAssertFalse(
+      sawASecondRequest,
+      "One transaction, checked twice at once, was sent — and billed — twice."
+    )
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+    XCTAssertEqual(Self.checkIdempotencyKeys(transport), ["txn-same"])
+  }
+
+  /// A keyed caller must not join an unkeyed flight, and this is the direction that costs something
+  /// beyond a miscounted charge. `isRetryable` keys off the *caller's* key, so a keyed check that
+  /// joined an unkeyed flight inherits that flight's refusal to retry: the caller did the one thing
+  /// the SDK asks of them in order to survive a 5xx or a timeout, and got no retry anyway, with
+  /// nothing to indicate why. Their key does not reach the server either.
+  func testACheckWithACallerKeyDoesNotJoinAnUnkeyedFlight() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+    } second: {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, idempotencyKey: "txn-c")
+    }
+
+    XCTAssertTrue(
+      sawASecondRequest,
+      "A keyed check joined an unkeyed flight, losing the retry budget its key was for."
+    )
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+
+    let keys = Self.checkIdempotencyKeys(transport)
+    XCTAssertTrue(keys.contains("txn-c"), "the caller's own key never went on the wire: \(keys)")
+    // The unkeyed one still carries a generated key, and the keyed one is not one of those.
+    XCTAssertEqual(keys.filter { $0.hasPrefix("sdk-") }.count, 1, "\(keys)")
+  }
+
+  /// The `Idempotency-Key` of every check request the transport saw, in the order they were sent.
+  /// Filtered by path because the OAuth endpoints share the transport and carry no such header.
+  private static func checkIdempotencyKeys(_ transport: FakeHTTPTransport) -> [String] {
+    transport.requests
+      .filter { $0.url.path.hasSuffix("scammer-checks") }
+      .compactMap { $0.header("Idempotency-Key") }
+  }
+
   /// The latch is released when the flight settles, not held for the process. A latch that leaked
   /// would answer every later check for that identifier from one ancient response, which is the
   /// cache's job and is governed by a TTL this map does not have.
