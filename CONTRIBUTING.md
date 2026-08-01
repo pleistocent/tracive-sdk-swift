@@ -78,6 +78,32 @@ by reformatting the fixture from 21 662 bytes to 32 533 and watching all 259 tes
 If the pin goes red, the fixture moved. Re-pinning is the wrong repair unless the new bytes came
 from upstream and are landing in the other three repositories in the same breath.
 
+### And nothing may sit between a fixture value and the assertion that reads it
+
+Pinning the file is only half of it. The pin proves the *bytes* did not move; it says nothing about
+whether a test still asserts what they mean. So: no exception map, no ternary on a "pending" or
+"known-failing" lookup, no allow-list of vector ids, no filter applied to the vector list before it
+is iterated. A fixture value goes straight into the assertion, and if a vector genuinely cannot be
+satisfied, a red build is the correct outcome and the conversation belongs upstream.
+
+This is written down because it happened in the React Native SDK, and nothing about it was React
+Native-specific. A test there declared an empty map of "pending" guard cases and consulted it before
+each expectation:
+
+```ts
+expect(isValidRecordKey(value)).toBe(pending ? PENDING_GUARD_CASES[value] : safe);
+```
+
+It was empty, so it changed no outcome — and that is exactly what made it worth removing. The
+fixture stayed byte-identical, its hash check passed, the pinned vector counts still matched, and
+every one of those guards would have stayed green while a single entry in that map let that SDK
+disagree with the shared contract in silence. A mechanism whose only purpose is to opt out of the
+anti-drift contract while staying green should not exist, empty or not.
+
+No tool catches this, and none can: while that map was empty the behaviour was identical, so there
+was nothing for a check to observe — and once it held an entry, the test would pass *because* of it.
+It is on you and on the reviewer, at the moment the line is written.
+
 ---
 
 ## Foundation's defaults are not the specification
