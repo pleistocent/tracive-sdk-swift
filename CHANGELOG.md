@@ -17,12 +17,73 @@ source compatibility until the API freezes at 1.0.
   miss, and a miss is still billed. `QueryFolding` now uses a hand-written
   `WhiteSpace ∪ LineTerminator` class asserted against the fixture.
 
+- **`signOut()` could be silently undone by an in-flight token refresh.** `signOut()` awaited
+  `POST /oauth/revoke` before clearing the token store, so a refresh parked on its own round trip
+  could resume afterwards and write its rotated grant back. The user was told they had signed out
+  while a live, freshly rotated refresh token stayed in the Keychain. Cancelling the refresh task
+  was not a fix: cancellation is cooperative, and a response already on the wire arrives regardless.
+  Every token write is now gated on a generation counter that `signOut()` and `clearStoredTokens()`
+  bump, and `signOut()` clears the store before the revoke rather than after.
+- **`authorize()` could strand its caller forever.** The continuation was installed *after*
+  `appLauncher.open(…)`, so a callback arriving during the launch completed the whole flow — grant
+  stored, `.authorized` returned — while `authorize()`'s `await` never resumed. The continuation is
+  now installed before the launch.
+- **A corrupt cache data key was permanent.** A stored key that could no longer produce a usable AES
+  key (an Enclave reset, a restore onto another device) made `dataKey()` throw for the lifetime of
+  the install, and because the `.cacheFirst` path swallows cache errors, the only symptom was every
+  check going to the server and being billed. The unusable item is now replaced and the cache
+  restarts cold. Transient Keychain unavailability still propagates untouched.
+- **The 401 replay could double-charge.** After refreshing an expired token the SDK re-sends the
+  same non-idempotent check; with no caller-supplied `Idempotency-Key` the two attempts were
+  indistinguishable to the server. The SDK now generates a per-call key when the caller supplies
+  none. This does not grant a retry budget — that still requires the caller's own key.
+- **`+` was not percent-encoded in the authorize URL.** `URLComponents.queryItems` leaves `+`
+  unescaped, and a server parsing the query with a form decoder reads it as a space — breaking a
+  `redirect_uri` exact match or a `partner_user_id` account link. It is now emitted as `%2B`.
+- **`KeychainTokenStore` did not opt macOS into the data-protection keychain**, so the
+  `ThisDeviceOnly` accessibility class the docs promise was ignored there. Both Keychain-backed
+  stores now build their query through one shared definition so they cannot diverge again.
+- **`SQLiteCheckCache.read` deleted a row while its `SELECT` was still open**, which can return
+  `SQLITE_LOCKED` and, because the delete is best-effort, silently leave the row behind.
+- **`SQLiteStatement` did not retain its `SQLiteConnection`**, leaving a use-after-free available to
+  the first caller who outlived one.
+
 ### Changed
 
-- `query-grammar-vectors.json` updated to **version 2**: 33 vectors (8 new, covering NBSP/ZWSP
-  trimming, length-changing case mapping, Arabic-Indic digit stripping and the unfolded `0X` EVM
-  prefix) plus new `crossLanguageSemantics` and `documentIdGuard` sections. Both new sections are
-  now driven as tests rather than read as prose.
+- `query-grammar-vectors.json` updated to **version 3**: 34 vectors and 11 rejection cases. The
+  `nfcScope` note now states correctly that NFC applies to *every* code field, the bank code
+  included, and a new `bank-code-nfc-composes-before-uppercasing` vector pins it — composition there
+  is length-changing, so an implementation that skipped it would build keys that can never match.
+  The Swift suite now also pins the vector and rejection counts, so a vector dropped during a
+  re-vendor fails the build instead of shrinking the contract silently.
+- `TraciveError` and `AuthResult` are now **checked** `Sendable` rather than `@unchecked`. The
+  `any Error` payload never blocked conformance, so the opt-out was unnecessary — and it was
+  suppressing exactly the check that stops a future case carrying a thread-unsafe payload.
+- `checkScammer` always sends an `Idempotency-Key`, generated per call (prefixed `sdk-`) when the
+  caller supplies none. Previously the header was absent unless the caller passed one.
+- Documentation now states that a `detail: .full` request on a cache-reading source can be answered
+  from a stored minimal row with `comments` and `topChronologies` `nil` — which means "not fetched",
+  not "none on file". Check `origin == .server`, or pass `source: .server`. The behaviour is
+  unchanged; it was undocumented, which on the default source is a wrong fraud answer waiting to
+  happen.
+- The documented OAuth scope is `scammer.check` everywhere, and the README quick start now also
+  lists `credits.read`. The prose docs previously named a different, read-flavoured scope that no
+  code path ever used, so a partner copying the quick start would have been refused with
+  `403 missing_scope`. (The old spelling is deliberately not repeated here: a test scans these
+  documents for scope strings the SDK never requests, and it does not know prose from example.)
+- `signOut()` is documented as **not** clearing the check cache, with the shared-device consequence
+  spelled out, and `TraciveClient.init` is documented as doing blocking disk and Keychain I/O.
+
+### Internal
+
+- CI can now fail where it previously could not: it builds for iOS (so `UIKitAppLauncher` is
+  compiled at all), enforces the Swift 6 language mode and `-strict-concurrency=complete` with
+  warnings as errors, and checks the dependency-free guarantee against the manifests themselves —
+  the old guard inspected a `Package.resolved` that is never written for a dependency-free package,
+  so it was unconditionally green, and it did not cover the Example at all.
+- `OfflineGuaranteeTests` enforces the "no network, no Keychain" property of the test suite, which
+  was previously only asserted in prose.
+- Removed every citation to internal-only material, along with an unused `Darwin` import.
 
 ## [0.1.0] — 2026-07-31
 
