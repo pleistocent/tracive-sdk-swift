@@ -7,7 +7,15 @@ import Foundation
 /// crashes and is never swallowed — it maps to `.server` (5xx) or `.unknown` (anything else)
 /// carrying the raw code, so a future-version error code shipped after this SDK still reaches the caller
 /// intact.
-public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, LocalizedError {
+/// ## On `Sendable`
+///
+/// Conformance is **checked**, not `@unchecked`. It used to be the latter, presumably because
+/// `case network(cause: any Error)` looks like it carries a non-`Sendable` payload. It does not:
+/// the `Error` protocol implies `Sendable`, so `any Error` satisfies the requirement and the
+/// compiler can verify the whole enum. Do not reintroduce `@unchecked` here — it would silence the
+/// one check that stops a future case carrying a mutable, thread-unsafe payload into a type this
+/// SDK hands across concurrency domains on every failure path.
+public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedError {
 
   /// A surface that exists but is not wired up yet — today, only Proxy mode (phase 2).
   case notImplemented(String)

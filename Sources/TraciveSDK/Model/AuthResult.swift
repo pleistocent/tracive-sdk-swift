@@ -4,7 +4,10 @@ import Foundation
 ///
 /// `description` redacts the authorization code and the PKCE verifier: both are single-use
 /// credentials, and a leaked pair lets an attacker complete the exchange.
-public enum AuthResult: @unchecked Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+/// `Sendable` here is **checked**, not `@unchecked`. The opt-out was inherited from `TraciveError`,
+/// which `.failed` carries; now that `TraciveError`'s own conformance is checked, this one can be
+/// too. See the note on `TraciveError` before reintroducing either.
+public enum AuthResult: Sendable, CustomStringConvertible, CustomDebugStringConvertible {
 
   /// `.public` client: the SDK completed the token exchange and stored the tokens in the Keychain.
   /// `grantedScopes` is what the user actually consented to, which may be narrower than requested —
