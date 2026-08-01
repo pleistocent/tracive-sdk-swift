@@ -105,6 +105,27 @@ public enum AuthorizeURLBuilder {
     // Preserve anything the integrator baked into a custom endpoint.
     components.queryItems = (components.queryItems ?? []) + items
 
+    // `URLComponents` escapes `&`, `=`, `#` and space in a query value, but **not** `+` — it is a
+    // legal sub-delim under RFC 3986, where it means a literal plus. Plenty of servers, though,
+    // parse a query string with a form-urlencoded decoder, under which `+` means a *space*. The two
+    // readings disagree and we cannot know which the authorization server uses, so we emit `%2B`,
+    // which means a literal plus under both. This is the same hazard `FormURLEncoding` below exists
+    // for; it applies just as much to a URL as to a body.
+    //
+    // `state` and `code_challenge` are base64url and never contain `+`. The exposure is the
+    // partner-supplied values: a `+` in `redirect_uri` fails the server's exact match and produces
+    // a consent rejection the partner cannot diagnose from the client, and a `+` in
+    // `partner_user_id` breaks the 1:1 account link the parameter exists for.
+    //
+    // Deliberately a targeted substitution rather than re-encoding every value against the
+    // unreserved set: that would also percent-encode `:` and `/` inside `redirect_uri`, and since
+    // redirect-URI matching is exact with no tolerance, over-encoding could itself cause the
+    // rejection this is meant to prevent. At this point a `+` in the assembled query can only have
+    // come from a literal `+` in a value — `URLComponents` writes a space as `%20`, never as `+` —
+    // so the substitution cannot corrupt anything.
+    components.percentEncodedQuery = components.percentEncodedQuery?
+      .replacingOccurrences(of: "+", with: "%2B")
+
     guard let url = components.url else {
       throw TraciveError.unknown(
         status: nil,

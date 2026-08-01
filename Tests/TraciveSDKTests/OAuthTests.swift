@@ -98,6 +98,75 @@ final class OAuthTests: XCTestCase {
     XCTAssertFalse(request.url.absoluteString.lowercased().contains("secret"))
   }
 
+  /// `+` must be percent-encoded in the authorize URL.
+  ///
+  /// `URLComponents.queryItems` does not escape it — `+` is a legal query sub-delim under RFC 3986,
+  /// where it means a literal plus. But a great many servers parse a query string with a
+  /// form-urlencoded decoder, under which `+` means a **space**. The two readings disagree, and the
+  /// SDK cannot know which one the authorization server uses. `%2B` means a literal plus under both.
+  ///
+  /// This is the same hazard `FormURLEncoding` exists for, ten lines further down the same file:
+  /// its doc comment spells out that "`+` in a form body decodes as a space on the server". The URL
+  /// builder simply did not apply the same care.
+  ///
+  /// `state` and `code_challenge` are base64**url** and can never contain `+`. The exposure is the
+  /// partner-supplied values: a `+` in `redirect_uri` produces a consent rejection the partner
+  /// cannot diagnose from the client side, because redirect-URI matching is exact; a `+` in
+  /// `partner_user_id` silently breaks the 1:1 account link the parameter exists for.
+  func testPlusIsPercentEncodedInTheAuthorizeURL() throws {
+    let configuration = OAuthConfiguration(
+      clientId: "client+one",
+      redirectUri: URL(string: "https://partner.example.com/cb+path")!,
+      scopes: ["scammer.check", "credits.read"],
+      partnerUserId: "user+42",
+      clientType: .public
+    )
+    let pkce = PKCE(codeVerifier: "v", codeChallenge: "chal", state: "ab+cd")
+
+    let url = try AuthorizeURLBuilder.build(
+      endpoint: URL(string: "https://tracive.id/oauth/authorize")!,
+      configuration: configuration,
+      pkce: pkce
+    )
+
+    // The raw wire form carries no bare `+` anywhere.
+    let raw = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?
+      .percentEncodedQuery)
+    XCTAssertFalse(raw.contains("+"), "a bare '+' survived into the authorize URL: \(raw)")
+    XCTAssertTrue(raw.contains("%2B"))
+
+    // …and every value still decodes back to exactly what was put in.
+    let query = Self.queryItems(of: url)
+    XCTAssertEqual(query["partner_user_id"], "user+42")
+    XCTAssertEqual(query["client_id"], "client+one")
+    XCTAssertEqual(query["redirect_uri"], "https://partner.example.com/cb+path")
+    XCTAssertEqual(query["state"], "ab+cd")
+    // Unaffected values must not be mangled by the escaping pass.
+    XCTAssertEqual(query["scope"], "scammer.check credits.read")
+    XCTAssertEqual(query["code_challenge"], "chal")
+    XCTAssertEqual(query["response_type"], "code")
+  }
+
+  /// The escaping pass must not disturb a URL that contains no `+`, and in particular must leave
+  /// `redirect_uri` byte-identical — the server matches it exactly, with no tolerance, so
+  /// over-encoding `:` or `/` here could itself cause a consent rejection.
+  func testTheAuthorizeURLIsOtherwiseUnchangedByTheEscapingPass() async throws {
+    let oauth = makeOAuth()
+    let request = try await oauth.makeAuthorizationRequest()
+
+    let raw = try XCTUnwrap(URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+      .percentEncodedQuery)
+    XCTAssertTrue(
+      raw.contains("redirect_uri=https%3A//partner.example.com/tracive/callback")
+        || raw.contains("redirect_uri=https://partner.example.com/tracive/callback"),
+      "redirect_uri was re-encoded beyond what URLComponents already does: \(raw)"
+    )
+    XCTAssertEqual(
+      Self.queryItems(of: request.url)["redirect_uri"],
+      "https://partner.example.com/tracive/callback"
+    )
+  }
+
   func testAuthorizeHostIsEnvironmentSpecific() {
     // Sandbox and production are parallel worlds: the dev app claims `sandbox.tracive.id` and the
     // store app claims `tracive.id`, so a sandbox consent can never land in a production app (§4.3).
