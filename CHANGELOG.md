@@ -420,6 +420,15 @@ source compatibility until the API freezes at 1.0.
 
 ### Internal
 
+- **The five default retry parameters are now written down and pinned.** No value changed: this SDK
+  already had the set the four are standardising on — `maxAttempts` 3, `multiplier` 2.0,
+  `initialBackoff` 500 ms, `jitter` 0.2, `maxBackoff` 8 s. What was missing was any recorded reason
+  for any of them, in any of the four repositories, which is how they came to ship three different
+  initial backoffs and two jitter ratios without a single review catching it. `RetryPolicy` now
+  carries the reasoning per number, and `RetryPolicyTests` asserts each one against a literal, so a
+  future divergence has to be written deliberately into a diff. The numbers are defensible starting
+  points rather than tuned constants — the Tracive API is not deployed, so nothing here has been
+  measured — and that is stated where they are defined.
 - **The vendored grammar fixture is now pinned by content hash**, in `swift test` and in CI, both
   reading one sidecar file. `query-grammar-vectors.json` is copied byte-identically into four SDK
   repositories, and identical bytes are the whole mechanism by which they are known to agree — but

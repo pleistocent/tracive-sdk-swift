@@ -1524,3 +1524,77 @@ enum Fixtures {
     scopes: ["scammer.check", "credits.read"]
   )
 }
+
+// MARK: - The shared retry defaults
+
+/// The five default retry parameters, pinned as literals.
+///
+/// These numbers are the shared cross-SDK contract, and nothing enforced them. The four Tracive SDKs
+/// shipped three different initial backoffs and two jitter ratios, with no reason recorded anywhere
+/// for any of them — which is exactly how a value nobody chose survives review in four repositories
+/// at once. `RetryPolicy` now carries the reasoning for each number; this pins the numbers, so a
+/// change has to be a deliberate one that shows up in a diff rather than an unexamined tweak.
+///
+/// Asserted against literals rather than against `RetryPolicy()` or against each other, because a
+/// test that compares a symbol to itself passes through any redefinition of it.
+final class RetryPolicyTests: XCTestCase {
+
+  func testTheDefaultPolicyIsTheSharedCrossSDKSet() {
+    let policy = RetryPolicy.default
+
+    XCTAssertEqual(policy.maxAttempts, 3)
+    XCTAssertEqual(policy.initialBackoff, 0.5, accuracy: 0)
+    XCTAssertEqual(policy.multiplier, 2.0, accuracy: 0)
+    XCTAssertEqual(policy.maxBackoff, 8.0, accuracy: 0)
+    XCTAssertEqual(policy.jitter, 0.2, accuracy: 0)
+    XCTAssertTrue(policy.respectsRetryAfter)
+  }
+
+  /// The schedule those numbers actually produce, which is the thing an integrator experiences.
+  /// Jitter is switched off so the assertion is on the curve rather than on a random draw.
+  func testTheDefaultScheduleIsHalfASecondThenOne() {
+    var policy = RetryPolicy.default
+    policy.jitter = 0
+
+    XCTAssertEqual(policy.delay(forRetry: 1), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(policy.delay(forRetry: 2), 1.0, accuracy: 1e-9)
+    // Two retries is all `maxAttempts: 3` allows, so the ceiling is never reached by default.
+    XCTAssertFalse(policy.allowsAnotherAttempt(after: 3))
+  }
+
+  /// `maxBackoff` binds only when a caller asks for more attempts than the default allows. Pinned
+  /// because a ceiling that is never exercised is a number nobody notices going wrong.
+  func testTheCeilingBindsOnceACallerRaisesMaxAttempts() {
+    var policy = RetryPolicy(maxAttempts: 10)
+    policy.jitter = 0
+
+    // 0.5, 1, 2, 4, 8, then held at 8 rather than continuing to 16.
+    XCTAssertEqual(policy.delay(forRetry: 5), 8.0, accuracy: 1e-9)
+    XCTAssertEqual(policy.delay(forRetry: 6), 8.0, accuracy: 1e-9)
+  }
+
+  /// Jitter only ever shortens a delay. If it could lengthen one, `maxBackoff` would stop being a
+  /// ceiling and the worst case would no longer be the one documented.
+  func testJitterOnlyEverShortensADelay() {
+    let policy = RetryPolicy.default
+    // Derived rather than written as a literal, so this test measures the jitter band alone and
+    // does not also re-assert the schedule that `testTheDefaultScheduleIsHalfASecondThenOne` pins.
+    var undithered = policy
+    undithered.jitter = 0
+    let base = undithered.delay(forRetry: 2)
+
+    for _ in 0..<200 {
+      let delay = policy.delay(forRetry: 2)
+      XCTAssertLessThanOrEqual(delay, base)
+      XCTAssertGreaterThanOrEqual(delay, base * (1 - policy.jitter))
+    }
+  }
+
+  /// A server asking for a specific window wins outright, including past `maxBackoff`: a server that
+  /// says 60 s means it, and second-guessing it is how a client turns a rate limit into a ban.
+  func testRetryAfterWinsOverTheComputedBackoffAndTheCeiling() {
+    let policy = RetryPolicy.default
+
+    XCTAssertEqual(policy.delay(forRetry: 1, retryAfter: 60), 60, accuracy: 0)
+  }
+}
