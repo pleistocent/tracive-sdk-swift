@@ -237,7 +237,7 @@ try client.cache.clear()
 |---|---|---|
 | `.cacheFirst` | fresh cache entry if there is one, otherwise the server (default) | always the server; the cache read is skipped |
 | `.server` | always the server; the response still refreshes the cache | always the server; the response is **not** cached |
-| `.serverFirst` | the server, falling back to the cache if the call fails | always the server; a failure is raised, not degraded |
+| `.serverFirst` | the server, falling back to the cache only when the failure is transient — a network error, 429 or 5xx. A 402 or 403 is raised, never masked by a cached verdict | always the server; a failure is raised, not degraded |
 | `.cache` | cache only; a miss throws `TraciveError.cacheMiss` rather than answering empty | always `TraciveError.cacheMiss`; still no network call |
 
 ### `detail: .full` does not use the cache at all — in either direction

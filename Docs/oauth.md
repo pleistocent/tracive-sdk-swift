@@ -261,7 +261,7 @@ Calling something outside your granted scopes returns `403 missing_scope`, which
 
 The whole flow is unit-testable with no server and no browser:
 
-- inject a fake `HttpTransport` so `POST /oauth/token` returns whatever you want, including the 401
+- inject a fake `HTTPTransport` so `POST /oauth/token` returns whatever you want, including the 401
   and 402 paths;
 - call `handleCallback(url:)` directly with a hand-built redirect URL. Test the good path, a wrong
   `state` (must give `.failed(.stateMismatch)`), a `?error=access_denied` (must give `.denied`), and
