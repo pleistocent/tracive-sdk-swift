@@ -1334,6 +1334,131 @@ final class OAuthTests: XCTestCase {
     XCTAssertNil(try store.load())
   }
 
+  // MARK: - A refresh token is never presented twice
+
+  /// The sequential hazard the single-flight latch cannot see.
+  ///
+  /// A refresh whose transport throws without producing a response is indistinguishable from one
+  /// that succeeded and lost its reply: the server may already have rotated the token and be
+  /// waiting to be shown the replacement. The latch is clear by then, and the store still holds the
+  /// old token, so the next caller used to pick it up and send it — which is exactly the pattern
+  /// reuse detection answers by revoking the whole grant, signing the user out of an integration
+  /// that was working.
+  ///
+  /// Nothing here is concurrent. Two ordinary sequential calls are enough.
+  func testARefreshThatNeverGotAnAnswerIsNotPresentedASecondTime() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, index in
+      // The first attempt dies on the wire; every later one would be answered normally, so a token
+      // that reaches the transport reaches it because this SDK chose to send it.
+      if index == 0 { throw URLError(.timedOut) }
+      return .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let first = await expectTraciveError {
+      try await oauth.refreshTokens(staleAccessToken: "access-1")
+    }
+    XCTAssertEqual(first?.kind, .invalidToken)
+    XCTAssertEqual(first?.serverCode, "refresh_outcome_unknown")
+
+    // The store is untouched, so this second call reads back the very same refresh token.
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-1")
+
+    let second = await expectTraciveError {
+      try await oauth.refreshTokens(staleAccessToken: "access-1")
+    }
+    XCTAssertEqual(second?.kind, .invalidToken)
+    XCTAssertEqual(second?.serverCode, "spent_refresh_token")
+
+    // The assertion the whole guard is for: the second attempt was refused locally and never
+    // reached the wire. One request, not two.
+    XCTAssertEqual(transport.callCount, 1)
+  }
+
+  /// The other half of the rule, and the one that keeps it from being a foot-gun: an error
+  /// *response* proves no tokens were issued (RFC 6749 §5.2), so the token is spendable again.
+  /// Without the release, a single 500 would end the grant permanently.
+  func testAnHTTPErrorResponseLeavesTheRefreshTokenSpendable() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, index in
+      index == 0 ? .error(status: 500, code: nil) : .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let first = await expectTraciveError {
+      try await oauth.refreshTokens(staleAccessToken: "access-1")
+    }
+    XCTAssertEqual(first?.kind, .server)
+
+    // The same stored token goes out again, and the grant survives the outage.
+    let token = try await oauth.refreshTokens(staleAccessToken: "access-1")
+    XCTAssertEqual(token, "access-2")
+    XCTAssertEqual(transport.callCount, 2)
+    XCTAssertEqual(Self.formFields(transport.requests.last?.body)["refresh_token"], "refresh-1")
+  }
+
+  /// Why the history holds eight entries rather than one.
+  ///
+  /// A single slot only ever answers for the most recent rotation. A store whose contents move
+  /// backwards — a restored device backup, or a host app that keeps its own copy of the grant and
+  /// writes it back — can hand back a token from further back than that, and a one-slot guard would
+  /// wave it straight through to the wire.
+  func testARefreshTokenTwoRotationsOldIsStillRefused() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let secondRotation = """
+      {
+        "access_token": "access-3",
+        "refresh_token": "refresh-3",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "scope": "scammer.check credits.read"
+      }
+      """
+    let transport = FakeHTTPTransport { _, index in
+      index == 0 ? .ok(json: Fixtures.refreshedTokenJSON) : .ok(json: secondRotation)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    // Two successful rotations: refresh-1 → refresh-2 → refresh-3.
+    _ = try await oauth.refreshTokens(staleAccessToken: "access-1")
+    _ = try await oauth.refreshTokens(staleAccessToken: "access-2")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-3")
+
+    // The store is rolled back to the grant as it stood two rotations ago.
+    try store.save(Fixtures.storedTokens)
+
+    let error = await expectTraciveError {
+      try await oauth.refreshTokens(staleAccessToken: "access-1")
+    }
+    XCTAssertEqual(error?.serverCode, "spent_refresh_token")
+    XCTAssertEqual(transport.callCount, 2)
+  }
+
+  /// The history belongs to the grant, so dropping the grant drops it. Otherwise a user who signed
+  /// out and back in on the same device could be refused a token the server had just issued.
+  func testSignOutForgetsWhichRefreshTokensWereSpent() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, index in
+      if index == 0 { throw URLError(.timedOut) }
+      return .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    _ = await expectTraciveError { try await oauth.refreshTokens(staleAccessToken: "access-1") }
+
+    await oauth.signOut()
+
+    // A fresh consent lands the same grant back in the store — the shape a re-authorization on the
+    // same device takes when the server hands back a token this actor has seen before.
+    try store.save(Fixtures.storedTokens)
+    let token = try await oauth.refreshTokens(staleAccessToken: "access-1")
+
+    XCTAssertEqual(token, "access-2")
+    // The timed-out refresh, the best-effort revoke, and this one.
+    XCTAssertEqual(transport.callCount, 3)
+  }
+
   // MARK: - Sign out
 
   func testSignOutRevokesThenClears() async throws {

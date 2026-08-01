@@ -33,6 +33,52 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **A refresh that timed out left its refresh token in the store, and the next refresh sent it
+  again — which is what makes a server revoke a grant.** The refresh token rotates, and presenting
+  a rotated one is the exact pattern reuse detection looks for; the server's correct response is to
+  revoke the **whole grant**, not to fail the one call. The single-flight `refreshTask` did not
+  cover this, and the reason is worth stating precisely: that latch answers "is a refresh running
+  right now", which is the concurrent case. This one is sequential. The first attempt dies on the
+  wire, the latch clears on its way out, the store still holds the old token, and whatever asks
+  next picks it up and sends it. Two ordinary sequential calls were enough, and no test in this
+  package pinned it.
+
+  The SDK now records the refresh tokens it has actually put on the wire, and applies one rule.
+  **A complete HTTP response settles the question whatever its status** — a token endpoint that
+  answers with an error has issued no tokens (RFC 6749 §5.2), so the token was not consumed and is
+  spendable again. That half is what keeps the fix from being its own bug: without it a single
+  `500` would end a grant permanently. **No response at all settles nothing** — a socket timeout is
+  indistinguishable from a success whose reply was lost, so the token is treated as spent and the
+  caller is told to authorize again.
+
+  That last case costs a consent, and it is the better trade rather than the more timid one: if the
+  token really was consumed, the grant already needed re-authorization and this avoids a revocation
+  event on top of it; if it was not, the price is one consent the user did not strictly need.
+  Retrying loses outright in the first case and at best draws in the second. A connect-phase or DNS
+  failure would prove the request never arrived and could safely be released — the SDK deliberately
+  does not try to detect one, because `HTTPTransport` is a protocol an integrator may implement and
+  matching on that error's shape would be guesswork about exactly the boundary the rule turns on.
+
+  **Two new codes, both on `TraciveError.invalidToken`, both terminal, both answered by
+  `authorize()`.** `refresh_outcome_unknown` is a refresh that got no answer; `spent_refresh_token`
+  is a stored token this flow has already presented, refused locally with nothing sent. Neither
+  clears the store — nothing was rejected on either path, and a record being debugged should still
+  be there when someone looks. `refresh_outcome_unknown` is deliberately **not** `.network`:
+  `.network` reports as `isTransient`, and a caller acting on that would retry, which is the one
+  move these codes exist to prevent. **Integrators should expect the narrow case where a refresh
+  round trip fails offline to surface as `.invalidToken` rather than `.network`** — it therefore no
+  longer degrades to a cached verdict under `.serverFirst`, which is correct: a cached answer would
+  hide a grant whose state nobody knows.
+
+  The history holds the last eight tokens rather than only the most recent, matching the sibling
+  SDKs. A single slot was tried in the Flutter SDK and could not answer for a token two rotations
+  back — reachable here whenever a store's contents move backwards, from a restored device backup
+  or a host app that keeps its own copy of the grant and writes it back. It is emptied wherever the
+  grant is dropped, so a fresh consent starts clean.
+
+  Kotlin, Flutter and React Native are landing the same guard; Flutter shipped it first and is the
+  reference for the rule.
+
 - **An unrecoverable stored grant was reported as `.grantRevoked`, which said the server had done
   something it had not done.** A stored record holding a blank access token with no refresh token
   beside it has nothing left to spend and nothing to renew from, so `accessToken()` fails — that

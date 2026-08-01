@@ -363,6 +363,55 @@ legitimate security response.
 
 If you ever wrap or reimplement the token layer, this is the property to preserve.
 
+### A refresh token is never presented twice
+
+Single-flight answers "is a refresh running *right now*". It cannot answer the sequential version of
+the same question, and that one is where a grant actually gets lost.
+
+A refresh whose transport fails **without producing a response** — a socket timeout, a connection
+dropped mid-flight — is indistinguishable from one that succeeded and lost its reply on the way back.
+The server may already have rotated the token and be waiting to be shown its replacement. By then
+nothing is in flight to observe, and the store still holds the old token, so the next thing that asks
+picks it up and sends it. That is precisely the pattern reuse detection is built to catch, and its
+answer is to revoke the **whole grant** rather than to fail the one call.
+
+So the SDK records the refresh tokens it has actually put on the wire, and applies one rule:
+
+| Outcome of the refresh | The token is |
+|---|---|
+| any complete HTTP response with an error status | **not** spent — an error response issues no tokens (RFC 6749 §5.2), so it may be sent again |
+| a 2xx | spent — the pair has rotated |
+| no response at all | treated as spent — nobody can say which of the two happened |
+
+The middle case is why one `500`, or one rate limit, does not end a grant. The last case costs a
+consent, and it is worth being clear that this is the better trade rather than the more timid one: if
+the token really was consumed, the grant already needed re-authorization and this avoids a revocation
+event on top of it; if it was not, the price is one consent the user did not strictly need. Retrying
+loses outright in the first case and at best draws in the second.
+
+A connect-phase or DNS failure would prove the request never arrived and could safely be released.
+The SDK does not try to detect one. `HTTPTransport` is a protocol you may implement, so that error is
+whatever your transport chose to throw, and pattern-matching it would be guesswork about exactly the
+boundary the rule turns on.
+
+Two error codes come out of this, both `TraciveError.invalidToken`, both terminal, and the remedy for
+both is `authorize()`:
+
+| Code | Meaning |
+|---|---|
+| `refresh_outcome_unknown` | the refresh got no answer at all; its token will not be sent again |
+| `spent_refresh_token` | the stored refresh token has already been presented, so this call sent nothing |
+
+Neither clears the store. Nothing was rejected on either path, and a record you are debugging should
+still be there when you look. Note that `refresh_outcome_unknown` is deliberately **not**
+`.network`: `.network` is `isTransient`, and a caller acting on that would retry — which is the one
+move these codes exist to prevent.
+
+The SDK remembers the last eight spent tokens rather than only the most recent one. A store whose
+contents move backwards — a restored device backup, or a host app that keeps its own copy of the
+grant and writes it back — can hand back a token from further back than the last rotation, and a
+one-slot guard waves that straight through to the wire.
+
 ### `grant_revoked`
 
 ```swift
@@ -378,9 +427,11 @@ Every one of those is something that happened **to the grant**, and this error i
 It reaches you from a `401 grant_revoked` on any request, from a refresh the server answered with
 `invalid_grant` or `grant_revoked`, from a refresh that a rejected token started and that found no
 refresh token to renew from, and from a `signOut()` that dropped the grant while a refresh was in
-flight. It does **not** reach you from a damaged record read off the device — that is
-`.invalidToken` with the code `unusable_grant`, as described above. So an alert on `.grantRevoked`
-is an alert on a grant that really ended, not on one device's storage.
+flight. It does **not** reach you from a damaged record read off the device (`.invalidToken` with
+`unusable_grant`), nor from a refresh the SDK refused to send or could not learn the outcome of
+(`spent_refresh_token` and `refresh_outcome_unknown`) — in all three the server said nothing, so
+nobody revoked anything. So an alert on `.grantRevoked` is an alert on a grant that really ended,
+not on one device's storage or one dropped connection.
 
 ## Sign-out
 

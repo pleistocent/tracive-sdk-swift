@@ -38,6 +38,11 @@ import Foundation
 /// makes the "is a refresh already running?" check-and-set atomic, and the stored `Task` is what
 /// the second caller awaits instead of starting its own.
 ///
+/// That latch is only half of it, because it can only answer for refreshes that overlap in time.
+/// The sequential case — a refresh that got no answer at all, leaving the same token in the store
+/// for the next caller to send — is guarded separately, on the token's identity rather than on
+/// timing. See `spentRefreshTokens`.
+///
 /// ## There is no API key here
 ///
 /// Not in the authorize URL, not in the token request, not in the configuration. A public mobile
@@ -82,6 +87,34 @@ public actor TraciveOAuth {
   private var pendingContinuation: CheckedContinuation<AuthResult, Never>?
   /// The in-flight refresh, if any. This single stored value *is* the single-flight guarantee.
   private var refreshTask: Task<TraciveTokens, Error>?
+
+  /// The refresh tokens this actor has actually handed to the server, oldest first.
+  ///
+  /// A refresh token is single-use. Presenting one a second time is exactly what the server's reuse
+  /// detection is built to catch, and its answer is to revoke the **whole grant** rather than to
+  /// fail the one call — so the user is signed out of an integration that was working.
+  ///
+  /// `refreshTask` above does not cover this, and the reason is worth being precise about. That
+  /// latch answers "is a refresh running *right now*", which is the concurrent case: several 401s
+  /// arriving together. The hazard here is sequential. A refresh whose transport threw without ever
+  /// producing a response clears the latch on its way out and leaves the same refresh token sitting
+  /// in the store, live-looking, for whatever asks next — and whatever asks next sends it. No
+  /// timing check can catch that, because by then there is no longer anything in flight to observe.
+  /// This records what has already gone out, so such a caller is turned away on the token's
+  /// identity instead.
+  ///
+  /// A short history rather than a single slot, matching the sibling SDKs. A single slot was tried
+  /// in the Flutter SDK and could not answer for a token two rotations back, which is reachable
+  /// whenever the store's contents move backwards — a restored device backup, or a host app that
+  /// keeps a copy of the grant and writes it back.
+  ///
+  /// Emptied whenever the grant is dropped, so a fresh consent starts from a clean slate.
+  private var spentRefreshTokens: [String] = []
+
+  /// How many spent refresh tokens to remember: eight, the same number in every Tracive SDK.
+  /// Comfortably more rotations than a rolled-back store realistically spans, and small enough that
+  /// the whole of it is a handful of dead strings.
+  private static let spentRefreshTokenHistory = 8
 
   /// Bumped every time the grant is deliberately dropped (`signOut()`, `clearStoredTokens()`).
   ///
@@ -655,6 +688,15 @@ public actor TraciveOAuth {
   /// A refresh rejected with `invalid_grant` or `grant_revoked` clears the stored tokens and
   /// surfaces `.grantRevoked`. That is not retryable and must not be retried: the usual cause is
   /// the server's reuse detection having already killed the grant.
+  ///
+  /// A refresh token this flow has already presented is **never** presented again, even when it is
+  /// still what the store holds. That call fails locally, sending nothing, with `.invalidToken`
+  /// carrying the code `spent_refresh_token`; see `spentRefreshTokens` for why a token can end up
+  /// in that state.
+  ///
+  /// A refresh that failed with **no HTTP response at all** fails with `.invalidToken` carrying
+  /// `refresh_outcome_unknown`, and its token is treated as spent — nobody can say whether the
+  /// server consumed it. The remedy for both is `authorize()`.
   @discardableResult
   public func refreshTokens(staleAccessToken: String? = nil) async throws -> String {
     if let staleAccessToken, let current = storedTokens(), current.accessToken != staleAccessToken {
@@ -680,11 +722,35 @@ public actor TraciveOAuth {
       // here — so a grant that cannot be renewed really is finished, and clearing it is right.
       // `accessToken()` no longer arrives here: on that path nothing has been sent and nothing
       // rejected, so it answers `.invalidToken` itself and keeps the record. See there.
-      try? tokenStore.clear()
+      discardGrant()
       throw TraciveError.grantRevoked(
         TraciveErrorInfo(
           code: "grant_revoked",
           message: "The stored grant has no refresh token."
+        )
+      )
+    }
+
+    guard !spentRefreshTokens.contains(refreshToken) else {
+      // This token has already been handed to the server — by a refresh that finished, or by one
+      // that never learned whether it finished. Either way, sending it again is the pattern reuse
+      // detection exists to punish, and it is punished by revoking the grant rather than by
+      // failing the call. Refusing here costs one consent; sending it can cost the integration.
+      //
+      // No `authorize()` material is touched and the record is left exactly as it was found:
+      // nothing was spent by this call, so there is nothing to consume, and a partner debugging
+      // the report should still find the store holding what the report is about.
+      //
+      // The store is deliberately not re-read first, which is where this diverges from the Flutter
+      // SDK. There the read is asynchronous, so a caller can arrive holding a snapshot several
+      // rotations old and a re-read is what finds the token that replaced it. `storedTokens()` here
+      // is a synchronous read taken on the actor a few lines above, with no suspension since:
+      // reading it a second time cannot produce a different answer.
+      throw TraciveError.invalidToken(
+        TraciveErrorInfo(
+          code: "spent_refresh_token",
+          message: "The stored Tracive refresh token has already been presented to the server and "
+            + "will not be sent again. Call authorize() again."
         )
       )
     }
@@ -711,7 +777,7 @@ public actor TraciveOAuth {
   public func clearStoredTokens() {
     tokenGeneration &+= 1
     pending = nil
-    try? tokenStore.clear()
+    discardGrant()
   }
 
   /// Revokes the grant and forgets it locally.
@@ -739,7 +805,7 @@ public actor TraciveOAuth {
     // `tokenStore.clear()` erases the persisted attempt as well as the tokens, so a verifier cannot
     // outlive a sign-out; this drops the in-memory copy in the same breath.
     pending = nil
-    try? tokenStore.clear()
+    discardGrant()
 
     if let refreshToken = tokens?.refreshToken, !refreshToken.isEmpty {
       let body = FormURLEncoding.encode([
@@ -796,16 +862,75 @@ public actor TraciveOAuth {
       (name: "client_id", value: configuration.clientId),
     ])
 
+    let issuedAt = clock.now
+
+    // The token is marked spent BEFORE the request leaves, and what may take that marker off again
+    // is the whole of this rule. There are exactly two kinds of failure here, and telling them
+    // apart is the only thing that matters.
+    //
+    // **A complete HTTP response settles it, whatever its status.** A token endpoint that answers
+    // with an error has issued no tokens (RFC 6749 §5.2), so this one was not consumed and the
+    // marker comes off below. Without that release a single 500 would end the grant permanently,
+    // which would be a far worse bug than the one this guard exists for.
+    //
+    // **No response at all settles nothing.** A socket timeout, or a connection dropped mid-flight,
+    // is indistinguishable from a success whose reply was lost on the way back: the server may
+    // already have rotated this token and be waiting to be shown its replacement. Presenting the
+    // old one again is then precisely what reuse detection is looking for, and the answer to it is
+    // the loss of the whole grant rather than of one call. So the marker stays and the caller is
+    // told to authorize again.
+    //
+    // That is the strictly better trade rather than merely the more cautious one, and the argument
+    // is short. If the token really was consumed, the grant already needs re-authorization, and
+    // refusing to resend it avoids a revocation event on top of a sign-out that was happening
+    // anyway. If it was not consumed, the cost is one consent the user did not strictly need.
+    // Retrying loses outright in the first case and at best draws in the second.
+    //
+    // A connect-phase or DNS failure would in principle prove the request never arrived, and could
+    // safely release the marker. It is deliberately not detected. `transport` is a protocol a host
+    // app may implement, so the error is whatever some other package chose to throw, and matching
+    // on its shape would be a guess about exactly the ambiguous-versus-safe boundary this whole
+    // rule turns on. Every sibling SDK makes the same call.
+    markRefreshTokenSpent(refreshToken)
+
+    let response: HTTPResponse
+    do {
+      response = try await sendTokenRequest(body: body)
+    } catch {
+      // Deliberately not `.network`, and deliberately not carrying the transport's own error.
+      // `.network` reads as transient, and a caller acting on that would retry — which is the one
+      // move this branch exists to prevent. The underlying error is dropped because it was written
+      // by whichever transport the host installed, and this SDK does not put text it did not write
+      // into a value that travels to a crash reporter from a code path whose local variables are
+      // refresh tokens.
+      throw TraciveError.invalidToken(
+        TraciveErrorInfo(
+          code: "refresh_outcome_unknown",
+          message: "The Tracive refresh request failed before any answer arrived, so whether the "
+            + "refresh token was consumed is not knowable. It will not be presented again. Call "
+            + "authorize() again."
+        )
+      )
+    }
+
+    // The server answered, and it answered with an error, so nothing was issued and this token is
+    // spendable again. A 2xx is the opposite: the pair has rotated and the old token is dead from
+    // here on — including when the body carrying its replacement turns out to be undecodable, which
+    // is a response this SDK cannot read rather than one the server did not send.
+    if !response.isSuccess {
+      releaseRefreshToken(refreshToken)
+    }
+
     let refreshed: TraciveTokens
     do {
-      refreshed = try await postToken(body: body, issuedAt: clock.now)
+      refreshed = try decodeTokenResponse(response, issuedAt: issuedAt)
     } catch let error as TraciveError {
       // `invalid_grant` on a refresh means the refresh token is dead — expired, already rotated, or
       // killed by reuse detection. Either way the grant is gone; holding the tokens would only
       // produce more failures and more suspicious-looking traffic.
       let code = error.serverCode
       if code == "invalid_grant" || code == "grant_revoked" {
-        try? tokenStore.clear()
+        discardGrant()
         throw TraciveError.grantRevoked(
           TraciveErrorInfo(
             code: "grant_revoked",
@@ -837,7 +962,22 @@ public actor TraciveOAuth {
     return merged
   }
 
+  /// The whole token-endpoint round trip: send, then interpret. Used by the code exchange, where
+  /// the two halves need no telling apart.
   private func postToken(body: Data, issuedAt now: Date) async throws -> TraciveTokens {
+    let response = try await sendTokenRequest(body: body)
+    return try decodeTokenResponse(response, issuedAt: now)
+  }
+
+  /// Sends `body` to the token endpoint, throwing **only** when no HTTP response arrived at all.
+  /// Every status, 4xx and 5xx included, comes back as a returned `HTTPResponse`.
+  ///
+  /// Split out from the interpreting half on purpose. `performRefresh` has to distinguish "the
+  /// server answered, badly" from "nothing came back", because whether a rotated refresh token may
+  /// be presented a second time turns on exactly that distinction — and a single `throws` that
+  /// carries both cannot express it. Keeping the two in one method is what made the sequential
+  /// reuse hazard invisible in the first place.
+  private func sendTokenRequest(body: Data) async throws -> HTTPResponse {
     let request = HTTPRequest(
       method: .post,
       url: TraciveAPI.url(TraciveAPI.oauthToken, in: environment),
@@ -848,15 +988,20 @@ public actor TraciveOAuth {
       body: body
     )
 
-    let response: HTTPResponse
     do {
-      response = try await transport.send(request)
+      return try await transport.send(request)
     } catch let error as TraciveError {
       throw error
     } catch {
       throw TraciveError.network(cause: error)
     }
+  }
 
+  /// Decodes a token-endpoint response, or maps its status onto the error table.
+  private func decodeTokenResponse(
+    _ response: HTTPResponse,
+    issuedAt now: Date
+  ) throws -> TraciveTokens {
     let decoded = try TraciveResponseMapper.decode(
       OAuthTokenResponse.self,
       from: response,
@@ -892,6 +1037,34 @@ public actor TraciveOAuth {
 
   private func clearRefreshTask() {
     refreshTask = nil
+  }
+
+  /// Records `token` as handed to the server, evicting the oldest entry once the history is full.
+  private func markRefreshTokenSpent(_ token: String) {
+    guard !spentRefreshTokens.contains(token) else { return }
+    spentRefreshTokens.append(token)
+    if spentRefreshTokens.count > Self.spentRefreshTokenHistory {
+      spentRefreshTokens.removeFirst()
+    }
+  }
+
+  /// Takes `token` back off the spent list, for the one case that proves it was never consumed:
+  /// the server answered with an error, and an error response issues no tokens.
+  private func releaseRefreshToken(_ token: String) {
+    spentRefreshTokens.removeAll { $0 == token }
+  }
+
+  /// Erases the stored grant and everything this actor remembers about it.
+  ///
+  /// The spent history goes with the tokens because it is a fact *about* that grant: once the grant
+  /// is gone it answers a question nobody can still ask, and keeping it would hold dead credentials
+  /// in memory past the last moment they meant anything.
+  ///
+  /// Every place the grant is dropped routes through here rather than calling `tokenStore.clear()`
+  /// directly, so the two cannot drift apart as paths are added.
+  private func discardGrant() {
+    spentRefreshTokens.removeAll()
+    try? tokenStore.clear()
   }
 
   /// Returns `result` and hands the same value to a suspended `authorize()`, if there is one.
