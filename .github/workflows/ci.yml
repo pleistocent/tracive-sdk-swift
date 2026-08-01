@@ -57,6 +57,27 @@ jobs:
       - name: Test
         run: swift test -v
 
+      - name: Build for iOS
+        # `swift build` on this runner compiles for macOS only, so everything behind
+        # `#if canImport(UIKit)` or `#if os(iOS)` is never compiled by the two steps above. That is
+        # the whole of `UIKitAppLauncher` — the only production launcher, and the one that actually
+        # performs the app-to-app hop — plus the directory and file protection-class code in
+        # `SQLiteCheckCache`. On macOS the SDK substitutes `UnavailableAppLauncher`, so a completely
+        # broken iOS launcher would leave the rest of this workflow green.
+        #
+        # Verified rather than assumed: introducing a type error inside `UIKitAppLauncher` leaves
+        # `swift build` passing and fails this step. iOS is the platform the SDK is sold for, so it
+        # has to be compiled here.
+        #
+        # `xcodebuild` because plain `swift build` has no iOS destination. No test run: there is no
+        # simulator boot in this job, and compiling is what catches the regression class above.
+        run: |
+          xcodebuild \
+            -scheme TraciveSDK \
+            -destination 'generic/platform=iOS' \
+            -skipPackagePluginValidation \
+            build
+
   build-example:
     name: build the example app
     runs-on: macos-14
