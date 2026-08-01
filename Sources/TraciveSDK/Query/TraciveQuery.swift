@@ -61,6 +61,11 @@ public struct TraciveQuery: Equatable, Hashable, Sendable, CustomStringConvertib
   }
 
   /// Email address. Folded with NFC, then lowercase, then trim.
+  ///
+  /// A value with no `@` is **rejected**: the server does not validate the shape of an email, so
+  /// `EMAIL_budi` would be looked up, missed, and billed. Nothing stricter than `@`-presence is
+  /// applied — rejecting an address the server would have matched loses a real fraud answer, which
+  /// is worse than paying for one miss.
   public static func email(value: String) throws -> TraciveQuery {
     try TraciveQuery(kind: .email, searchQueryIndex: "EMAIL_" + QueryFolding.foldEmail(value))
   }

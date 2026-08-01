@@ -84,7 +84,6 @@ final class QueryGrammarTests: XCTestCase {
 
   /// `rejected[].id`s whose rejection this SDK does not implement yet.
   private static let pendingRejectedIds: Set<String> = [
-    "email-not-an-address",  // not_an_email
     "crypto-empty-address",  // empty_address
     "username-empty-platform",  // empty_platform
   ]
@@ -312,6 +311,56 @@ final class QueryGrammarTests: XCTestCase {
       Array(query.searchQueryIndex.utf8).contains(0xCC),
       "the folded key still contains a combining mark, so NFC was not applied"
     )
+  }
+
+  /// A value with no `@` is rejected before the request, because the server would happily look it
+  /// up and bill the miss.
+  ///
+  /// The server applies **no** shape validation to an email: `EMAIL_budi` is a perfectly legal
+  /// record key, so it is looked up, missed, and charged. Client-side rejection is the only thing
+  /// standing between a caller's typo and a spent credit — the same job `phone()`'s E.164 check
+  /// already does.
+  func testEmailWithoutAnAtSignIsRejected() {
+    XCTAssertThrowsError(try TraciveQuery.email(value: "budi")) { error in
+      // The token, not the enum case: it is a cross-SDK wire contract, so a rename must fail here
+      // rather than quietly redefine what Kotlin, Flutter and this SDK all agreed to emit.
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "not_an_email")
+    }
+
+    // Still rejected once the fold has run: trimming and lowercasing cannot introduce an `@`.
+    XCTAssertThrowsError(try TraciveQuery.email(value: "  BUDI  ")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "not_an_email")
+    }
+
+    // An empty value keeps its own token. The two mistakes are different and a caller may want to
+    // word them differently, so the emptiness check has to run first.
+    XCTAssertThrowsError(try TraciveQuery.email(value: "   ")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "empty_value")
+    }
+  }
+
+  /// The check is deliberately only `@`-presence, not an address grammar.
+  ///
+  /// Over-validating is the worse failure: a client-side rejection of an address the server would
+  /// have matched loses a real fraud answer, whereas a weird-but-plausible address costs at most
+  /// one miss. So every shape below — no TLD, an IP-literal domain, a quoted local part, a plus
+  /// tag, a bare `@` on either side — must build a key.
+  func testEmailValidationDoesNotImposeAnAddressGrammar() throws {
+    let accepted = [
+      "budi@localhost",
+      "budi@[192.168.0.1]",
+      "\"budi something\"@example.com",
+      "budi+tag@example.com",
+      "budi@@example.com",
+      "@example.com",
+      "budi@",
+    ]
+    for value in accepted {
+      XCTAssertNoThrow(
+        try TraciveQuery.email(value: value),
+        "'\(value)' contains an '@' and must not be rejected — the server would match it"
+      )
+    }
   }
 
   /// Digit stripping is ASCII-only, because the server strips with a `\d`-class regex that matches

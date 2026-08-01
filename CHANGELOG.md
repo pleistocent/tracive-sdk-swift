@@ -9,6 +9,19 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **`TraciveQuery.email(value:)` accepted anything non-empty, and every typo was billed.**
+  `email("budi")` built `EMAIL_budi` and sent it. The server applies no shape validation to an
+  email, so that is a perfectly legal record key: it is looked up, it misses, and the miss is
+  charged exactly like a hit. A client-side rejection was the only thing that could prevent the
+  charge — the same job `phone()`'s E.164 check has always done — and there wasn't one. A value
+  containing no `@` now throws `TraciveQueryError` with reason `not_an_email`.
+
+  The check is `@`-presence and deliberately nothing more. A fuller address grammar would reject
+  addresses the server would happily match (`budi@localhost`, an IP-literal domain, a quoted local
+  part), and that is the worse failure: over-rejecting loses a real fraud answer, while
+  under-rejecting costs at most one miss. An empty value keeps its own `empty_value` reason, so the
+  two mistakes stay distinguishable to a caller.
+
 - **`detail: .full` used the cache, and was wrong in both directions.** It now neither reads nor
   writes it. Two independent defects, one rule.
 

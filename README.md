@@ -156,8 +156,15 @@ try TraciveQuery.username(platform: "INSTAGRAM", handle: "@scammerx")
 ```
 
 **Validation is a cost control, not just hygiene.** A miss is billed the same as a hit, so a key that
-cannot possibly hit — a local-format phone number, an alpha-2 country code, an empty account — is a
-credit spent on nothing. The builders reject those locally, before the request is made.
+cannot possibly hit — a local-format phone number, an alpha-2 country code, an empty account, a
+value with no `@` passed to `email` — is a credit spent on nothing. The builders reject those
+locally, before the request is made.
+
+The email check is `@`-presence and nothing more. The server does not validate the shape of an
+email, so `EMAIL_budi` is a legal key: it is looked up, it misses, and you are charged. But a
+stricter address grammar here would be a downgrade, not an upgrade — rejecting an address the server
+would have matched loses you a real fraud answer, which costs more than one miss. `budi@localhost`,
+`budi@[192.168.0.1]` and `"budi something"@example.com` all build a key.
 
 **There is no `domain()` builder.** The plan lists a DOMAIN input type; the backend never shipped it
 and emits only PHONE / EMAIL / BANK / CRYPTO / USERNAME. A `DOMAIN_…` key would miss every time, and

@@ -19,6 +19,10 @@ public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
   case emptyBankCode = "empty_bank_code"
   /// Empty value for a single-value input (email, crypto address, username platform).
   case emptyValue = "empty_value"
+  /// The email contains no `@`, so it cannot be an address. The server applies no shape validation
+  /// of its own — `EMAIL_budi` is a legal record key, so it would be looked up, missed and billed.
+  /// This rejection is the only thing that prevents the charge.
+  case notAnEmail = "not_an_email"
   case emptyHandle = "empty_handle"
   case emptyChain = "empty_chain"
   /// The folded key is not a legal record key.
@@ -59,6 +63,8 @@ public struct TraciveQueryError: Error, Equatable, Hashable, Sendable, CustomStr
       return "The bank code is empty."
     case .emptyValue:
       return "The value is empty."
+    case .notAnEmail:
+      return "That is not an email address — it has no '@'."
     case .emptyHandle:
       return "The username handle is empty."
     case .emptyChain:

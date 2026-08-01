@@ -102,9 +102,20 @@ enum QueryFolding {
   ///
   /// NFC matters: a decomposed `e` + U+0301 and a precomposed U+00E9 are the same address to a
   /// human but different byte strings to the server, so one address would index as two entities.
+  ///
+  /// Then reject a value containing no `@`. The server performs **no** shape validation on an
+  /// email — `EMAIL_budi` is a legal record key, so it is looked up, missed, and billed — which
+  /// makes this rejection the only thing between a caller's typo and a spent credit, exactly as
+  /// `foldPhone`'s E.164 check is for a phone number.
+  ///
+  /// The check is `@`-presence and deliberately nothing more. A fuller address grammar would reject
+  /// addresses the server would happily match (`budi@localhost`, an IP-literal domain, a quoted
+  /// local part), and that is the worse failure: over-rejecting loses a real fraud answer, while
+  /// under-rejecting costs at most one miss.
   static func foldEmail(_ raw: String) throws -> String {
     let folded = jsTrim(raw.precomposedStringWithCanonicalMapping.lowercased())
     guard !folded.isEmpty else { throw TraciveQueryError(.emptyValue) }
+    guard folded.contains("@") else { throw TraciveQueryError(.notAnEmail) }
     return folded
   }
 
