@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(Darwin)
-  import Darwin
-#endif
-
 /// The production `CheckCache`: system SQLite for storage, CryptoKit AES-GCM per row for
 /// confidentiality.
 ///
