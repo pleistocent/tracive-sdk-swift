@@ -457,14 +457,34 @@ public actor TraciveClient {
     "sdk-" + UUID().uuidString.lowercased()
   }
 
-  /// The key the *caller* supplied, or `nil` when they supplied none. An empty string is none.
+  /// The key the *caller* supplied, or `nil` when they supplied none. A blank string is none.
   ///
   /// Three rules turn on this one answer — whether the check may be retried, which key goes on the
   /// wire, and whether the check may share a flight with another — so they read it from here rather
   /// than each re-deriving it. A caller passing `""` must not end up with a private latch that no
   /// other unkeyed caller can meet on.
+  ///
+  /// **Blank means whitespace-only, not merely empty**, and the difference is not cosmetic because
+  /// of what each of those three rules then does with `"   "`. It earns a retry budget: the SDK
+  /// cannot tell whether a repeated attempt was billed, so it retries only when the caller's own key
+  /// gives the server something to deduplicate the charge on, and three spaces gives it nothing. It
+  /// takes a latch of its own, which no ordinary unkeyed check can meet on, so two overlapping
+  /// checks of one identifier become two requests and two charges. And `Idempotency-Key:    ` goes
+  /// on the wire in place of the generated key that would otherwise let the SDK's own post-refresh
+  /// replay collapse.
+  ///
+  /// A blank key is never a considered choice — it is an unread configuration value, or an empty
+  /// field arriving where a transaction id was meant to be — so reading it as "no key" is what the
+  /// caller meant in every case where it occurs. Kotlin tests blankness and Flutter trims; this was
+  /// the only one of the four SDKs still testing emptiness.
+  ///
+  /// A key that is **not** blank is passed through byte for byte, surrounding whitespace included.
+  /// Only this SDK's reading of "is there a key here at all" changes: the string the caller chose is
+  /// what the server deduplicates on and what the partner has recorded against the transaction, so
+  /// quietly sending a trimmed version of it would be answering a different question than the one
+  /// that was asked.
   private static func callerIdempotencyKey(_ supplied: String?) -> String? {
-    supplied.flatMap { $0.isEmpty ? nil : $0 }
+    supplied.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
   }
 
   /// Runs `fetchAndStore` **single-flight**, because here the unit is currency.

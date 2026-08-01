@@ -128,6 +128,26 @@ source compatibility until the API freezes at 1.0.
   and nothing more. All four Tracive SDKs take this change together, so the latch collapses on the
   same four components everywhere.
 
+- **A whitespace-only `idempotencyKey` counted as a key the caller had chosen.** The one helper the
+  retry rule and the check latch both read tested the string for emptiness, and `"   ".isEmpty` is
+  `false`. Three spaces are not a transaction id — they are an unread configuration value or an
+  empty text field — but all three rules that turn on that answer acted as though a key had been
+  supplied.
+
+  It **earned a retry budget**, which is the half that costs money. The SDK repeats a failed check
+  only when the caller's own key gives the server something to deduplicate the charge on, and
+  `Idempotency-Key:    ` gives it nothing, so a 5xx or a timeout was retried with every attempt a
+  candidate to be billed again. It also **took a latch of its own** that no ordinary unkeyed check
+  could meet on, so a double-tapped button on a call site passing a blank value went out twice and
+  was billed twice — the exact failure the latch was just added to prevent. And the blank went on
+  the wire in place of the generated key that makes the SDK's own post-refresh replay collapsible.
+
+  Blank now means absent, which is what Kotlin (`isNotBlank`) and Flutter have always done; this was
+  the only one of the four SDKs still testing emptiness. **A key that is not blank is passed through
+  byte for byte, surrounding whitespace included** — only this SDK's reading of "is there a key
+  here at all" changes, because the string a caller chose is what the server deduplicates on and
+  what the partner recorded against the transaction.
+
 - **A refresh that timed out left its refresh token in the store, and the next refresh sent it
   again — which is what makes a server revoke a grant.** The refresh token rotates, and presenting
   a rotated one is the exact pattern reuse detection looks for; the server's correct response is to

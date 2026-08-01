@@ -1440,6 +1440,58 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(keys.filter { $0.hasPrefix("sdk-") }.count, 1, "\(keys)")
   }
 
+  /// A whitespace-only `idempotencyKey` is no key at all, and the retry budget is where that costs
+  /// something.
+  ///
+  /// `"   ".isEmpty` is `false`, so an emptiness test read three spaces as a key the caller had
+  /// chosen and unlocked the retry budget on the strength of it. The budget exists because the SDK
+  /// cannot tell whether a repeated attempt was billed — only the caller's key gives the server
+  /// something to deduplicate the charge on, and `Idempotency-Key:    ` gives it nothing. So the
+  /// check was retried, and each attempt was a candidate to be charged again.
+  func testABlankIdempotencyKeyEarnsNoRetryBudget() async throws {
+    let transport = FakeHTTPTransport { _, _ in .error(status: 503, code: nil) }
+    let client = makeClient(transport: transport, retryPolicy: .default)
+
+    let error = await expectTraciveError {
+      try await client.checkScammer(TestQueries.phone, idempotencyKey: "   ")
+    }
+
+    XCTAssertEqual(error?.kind, .server)
+    // Exactly as if no key had been passed at all: one attempt, and no second chance to be billed.
+    XCTAssertEqual(transport.callCount, 1)
+    // And the blank never reaches the wire — the check carries the SDK's own generated key, which
+    // is what makes its post-refresh replay collapsible server-side.
+    let keys = Self.checkIdempotencyKeys(transport)
+    XCTAssertEqual(keys.count, 1)
+    XCTAssertTrue(keys[0].hasPrefix("sdk-"), "a blank key went on the wire: \(keys)")
+  }
+
+  /// The other rule reading the same answer: a blank key must not fragment the check latch.
+  ///
+  /// Treated as a caller key, `"   "` bought the check a private latch that no ordinary unkeyed
+  /// check could meet on — so a double-tapped button whose call site happens to pass an empty
+  /// configuration value went out twice and was billed twice, which is the exact failure the latch
+  /// exists to prevent.
+  func testABlankIdempotencyKeyStillJoinsAnUnkeyedFlight() async throws {
+    let gate = TestGate()
+    let transport = Self.gatedCheckTransport(gate)
+    let client = makeClient(transport: transport)
+
+    let sawASecondRequest = await runOverlappingChecks(gate: gate, transport: transport) {
+      _ = try? await client.checkScammer(TestQueries.phone, source: .server)
+    } second: {
+      _ = try? await client.checkScammer(
+        TestQueries.phone, source: .server, idempotencyKey: "   ")
+    }
+
+    XCTAssertFalse(
+      sawASecondRequest,
+      "A blank idempotency key gave the check a latch of its own, so one identifier was sent — and "
+        + "billed — twice."
+    )
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+  }
+
   /// The `Idempotency-Key` of every check request the transport saw, in the order they were sent.
   /// Filtered by path because the OAuth endpoints share the transport and carry no such header.
   private static func checkIdempotencyKeys(_ transport: FakeHTTPTransport) -> [String] {
