@@ -54,8 +54,8 @@ that is the bug.
 
 ## Zero third-party dependencies, by design
 
-`Package.swift` has **no `dependencies:` array**, and CI fails the build if a `Package.resolved`
-with a resolved dependency ever appears.
+`Package.swift` has **no `dependencies:` array**, and CI fails the build if a third-party
+dependency is ever declared — in this package or in the Example.
 
 This is a feature, not an accident of scope. When you add a fraud-check SDK you inherit its supply
 chain: every transitive package is another maintainer who can ship code into your app, another
