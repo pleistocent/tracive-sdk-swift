@@ -1,6 +1,6 @@
 import Foundation
 
-/// Which side of the PKCE exchange the SDK is responsible for (§2, §6).
+/// Which side of the PKCE exchange the SDK is responsible for.
 ///
 /// - `.public`: the SDK performs the token exchange itself (`POST /oauth/token` with
 ///   `code` + `code_verifier`) and stores the resulting tokens in the Keychain.

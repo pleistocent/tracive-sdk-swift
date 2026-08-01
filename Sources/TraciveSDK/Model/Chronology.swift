@@ -1,6 +1,6 @@
 import Foundation
 
-/// One narrated incident attached to a scammer record (`detail = .full` only, §4).
+/// One narrated incident attached to a scammer record (`detail = .full` only).
 ///
 /// `incidentDate` is a **String**, not an instant: the server sends whatever precision the reporter
 /// gave (sometimes only a month), so parsing it into a `Date` would invent precision that is not

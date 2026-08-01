@@ -36,7 +36,7 @@ build/
 *.sqlite3-wal
 *.sqlite3-shm
 
-# Secrets. Nothing in this SDK needs an API key (§11.1) — if one of these shows up in a working
+# Secrets. Nothing in this SDK needs an API key — if one of these shows up in a working
 # copy, something is being integrated the wrong way.
 *.p8
 *.p12

@@ -1,8 +1,8 @@
 import Foundation
 
-/// Record-key legality check, applied to every key a `TraciveQuery` builds (§3).
+/// Record-key legality check, applied to every key a `TraciveQuery` builds.
 ///
-/// The scammer index is keyed by document id, so an illegal key cannot hit — and per §3.2 a miss is
+/// The scammer index is keyed by document id, so an illegal key cannot hit — and a miss is
 /// billed regardless. Rejecting locally is therefore a saved credit, not just tidiness.
 ///
 /// Rules (from the fixture's `rejected[]` entries and the API's own constraints):

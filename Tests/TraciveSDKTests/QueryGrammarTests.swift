@@ -6,7 +6,7 @@ import XCTest
 ///
 /// Every `vectors[]` entry must fold to its `expected` string and every `rejected[]` entry must
 /// throw with the stated `reason`. Kotlin, Flutter, Swift and the backend all run the same file, so
-/// a failure here means this SDK would build keys that miss on the server — and per §3.2 a miss is
+/// a failure here means this SDK would build keys that miss on the server — and a miss is
 /// still billed.
 ///
 /// Nothing in this file touches the network. The Open API does not exist yet.

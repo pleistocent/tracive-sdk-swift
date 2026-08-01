@@ -1,6 +1,6 @@
 import Foundation
 
-/// The answer to a single scammer check (§4).
+/// The answer to a single scammer check.
 ///
 /// The same type is used for a server response and for a cache hit; `origin` says which. Unknown
 /// JSON keys are ignored so a future-version server can add fields without breaking shipped apps.
@@ -19,7 +19,7 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   /// Currency code → reported fraud amount, e.g. `["IDR": 12_500_000]`.
   public let fraudAmount: [String: Double]
   public let tags: [String]
-  /// A count, never a list (§3.2) — the SDK must not be able to walk the scammer graph.
+  /// A count, never a list — the SDK must not be able to walk the scammer graph.
   public let relatedScammerCount: Int
   /// `detail = .full` only.
   public let topChronologies: [Chronology]?
@@ -28,9 +28,9 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   /// Absent on a cache hit: a cache hit is free, so there is nothing to bill.
   public let billing: Billing?
   /// Server-driven TTL override in seconds. When present it **replaces** the per-tier default
-  /// (§5) — this is the fleet-wide invalidation lever, so honour it.
+  /// — this is the fleet-wide invalidation lever, so honour it.
   public let cacheTtlSeconds: Int64?
-  /// Legal text that must be surfaced in any UI built on the SDK (§4).
+  /// Legal text that must be surfaced in any UI built on the SDK.
   public let disclaimer: String?
   public let origin: Origin
   /// When the underlying data was fetched **from the server**. On a cache hit this stays at the
@@ -79,7 +79,7 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
 
   // MARK: - Derived helpers
 
-  /// The copy that is safe to persist (§5).
+  /// The copy that is safe to persist.
   ///
   /// Caches **only** the fields that are invariant across `detail` and `locale`. `topChronologies`,
   /// `comments` and `billing` vary with the request, and `checkId` identifies one specific

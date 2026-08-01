@@ -1,12 +1,12 @@
 import CryptoKit
 import Foundation
 
-/// Encrypts and decrypts one cached row (§5, §11.6).
+/// Encrypts and decrypts one cached row.
 ///
 /// ## The design, and why it is not SQLCipher
 /// The Kotlin and Flutter SDKs get whole-file encryption from their storage layers. Swift does not,
 /// and adopting SQLCipher would cost the one property this SDK is sold on — **zero third-party
-/// dependencies** (§11.6). So the encryption happens a layer up: the row's JSON payload is sealed
+/// dependencies**. So the encryption happens a layer up: the row's JSON payload is sealed
 /// with AES-GCM from CryptoKit, a system framework, and the database file itself stays a plain
 /// SQLite file whose only readable columns are a digest and two timestamps.
 ///
@@ -42,7 +42,7 @@ struct CachePayloadCipher {
   ///
   /// `cacheableCopy()` is applied here as well as at the call site. It is idempotent, and this is
   /// the single point where bytes destined for disk are produced — enforcing "full detail is never
-  /// cached" (§5) here means no future caller can route around it.
+  /// cached" here means no future caller can route around it.
   func seal(_ result: CheckResult, for key: CheckCacheKey) throws -> Data {
     let cacheable = result.cacheableCopy()
     let plaintext: Data

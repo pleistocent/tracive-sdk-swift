@@ -7,7 +7,7 @@ import Foundation
 /// The default `HTTPTransport`: `URLSession` and nothing else.
 ///
 /// Zero third-party dependencies is this SDK's headline property for bank supply-chain review
-/// (§11.6), so the network layer is the system one. There is no interceptor stack, no logging hook
+///, so the network layer is the system one. There is no interceptor stack, no logging hook
 /// and no request printing — a token and a `searchQueryIndex` pass through here, and the cheapest
 /// way to guarantee they are never logged is to have nowhere for a log to happen.
 public final class URLSessionHTTPTransport: HTTPTransport, @unchecked Sendable {
@@ -17,9 +17,9 @@ public final class URLSessionHTTPTransport: HTTPTransport, @unchecked Sendable {
 
   /// - Parameters:
   ///   - session: defaults to an ephemeral session — no URL cache, no cookie jar, no credential
-  ///     storage. Tracive responses are cached by this SDK's own encrypted store (§5), so an HTTP
+  ///     storage. Tracive responses are cached by this SDK's own encrypted store, so an HTTP
   ///     cache would keep a second, *unencrypted* copy of the same answers on disk.
-  ///   - timeout: per-request timeout. A check that times out is the exact case §7 warns about: do
+  ///   - timeout: per-request timeout. A check that times out is the exact hazard here: do
   ///     not blind-retry it without an `Idempotency-Key`.
   public init(session: URLSession? = nil, timeout: TimeInterval = 30) {
     if let session {
@@ -51,7 +51,7 @@ public final class URLSessionHTTPTransport: HTTPTransport, @unchecked Sendable {
     do {
       (data, response) = try await Self.perform(urlRequest, on: session)
     } catch {
-      // No HTTP response at all: offline, DNS, TLS, timeout. §7 calls this `Network`.
+      // No HTTP response at all: offline, DNS, TLS, timeout. The contract calls this `Network`.
       throw TraciveError.network(cause: error)
     }
 

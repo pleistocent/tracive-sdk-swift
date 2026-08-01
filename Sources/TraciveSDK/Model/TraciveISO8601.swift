@@ -2,14 +2,14 @@ import Foundation
 
 /// The single ISO-8601 gateway used by every instant on the wire.
 ///
-/// The spec (§4) describes `firstReportOn`, `lastReportOn`, `nextResetAt`, `memberSince` and
+/// The spec describes `firstReportOn`, `lastReportOn`, `nextResetAt`, `memberSince` and
 /// `fetchedAt` as "ISO-8601 UTC". All parsing and formatting goes through here so the three SDKs
 /// agree byte-for-byte and so we allocate the (expensive) formatters exactly once.
 ///
 /// Parsing accepts both the whole-second form (`2026-07-09T10:00:00Z`) and the fractional-second
 /// form (`2026-07-09T10:00:00.123Z`), and any RFC 3339 offset (`+07:00`). Formatting always emits
 /// UTC with whole seconds, so instants round-trip through the cache at **second** precision — which
-/// is far below the smallest TTL in §5 (1 hour) and therefore harmless.
+/// is far below the smallest cache TTL (1 hour) and therefore harmless.
 public enum TraciveISO8601 {
 
   /// Parses an ISO-8601 instant. Returns `nil` for anything unparseable — callers treat a bad

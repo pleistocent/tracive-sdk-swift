@@ -1,10 +1,10 @@
 import Foundation
 
-/// Result of `GET /credits` (§4).
+/// Result of `GET /credits`.
 ///
 /// Do **not** call `credits()` before every check. Handle the `402` from the check itself instead —
 /// it saves one round trip per transaction, and the balance you read a moment earlier can be stale
-/// by the time the check lands anyway (§3.3).
+/// by the time the check lands anyway.
 public struct CreditsInfo: Codable, Equatable, Hashable, Sendable {
   public let subscriptionCredits: Int
   /// Subscription tier label as the server spells it. Kept as a `String` because the tier

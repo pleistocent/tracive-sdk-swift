@@ -1,15 +1,15 @@
 import Foundation
 
-/// How the SDK authenticates (§2).
+/// How the SDK authenticates.
 ///
 /// ## Hard design invariant
-/// **There is no API-key parameter anywhere in this surface, in either mode** (§11.1). A mobile
+/// **There is no API-key parameter anywhere in this surface, in either mode**. A mobile
 /// binary cannot keep a secret, so an API key embedded in one is a published credential. OAuth mode
 /// carries a user-scoped access token; Proxy mode carries whatever headers the partner's own
 /// backend minted for its own gateway. Do not add a key parameter to either configuration.
 public enum TraciveMode: Equatable, Hashable, Sendable {
   case oauth(OAuthConfiguration)
-  /// **phase 2.** Present in the surface so adding it later is not a breaking change (§11.1).
+  /// **phase 2.** Present in the surface so adding it later is not a breaking change.
   /// Every call made in this mode throws `TraciveError.notImplemented` until phase 2 lands.
   case proxy(ProxyConfiguration)
 
@@ -49,7 +49,7 @@ public enum TraciveMode: Equatable, Hashable, Sendable {
   }
 }
 
-/// OAuth + PKCE parameters (§2, §6). No client secret and no API key: a public mobile client has
+/// OAuth + PKCE parameters. No client secret and no API key: a public mobile client has
 /// nowhere safe to keep either.
 public struct OAuthConfiguration: Equatable, Hashable, Sendable {
   public let clientId: String
@@ -76,7 +76,7 @@ public struct OAuthConfiguration: Equatable, Hashable, Sendable {
   }
 }
 
-/// Partner-proxy parameters (§2, phase 2).
+/// Partner-proxy parameters (phase 2).
 ///
 /// `authHeaders` are whatever the partner's gateway expects — they are forwarded verbatim and never
 /// logged. This is still not an API-key parameter for the Tracive API: the partner's backend, not

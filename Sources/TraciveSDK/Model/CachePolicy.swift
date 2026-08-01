@@ -1,6 +1,6 @@
 import Foundation
 
-/// Freshness rules for the local encrypted result cache (§5).
+/// Freshness rules for the local encrypted result cache.
 ///
 /// The per-tier defaults come straight from the spec: `HIGH` 30 d, `ELEVATED` 7 d, `CAUTION` 24 h,
 /// `NONE` 1 h. A high-risk verdict is stable, so it can be held for a month; a clean verdict is the
@@ -15,7 +15,7 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
   public var cautionTtl: TimeInterval
   public var noneTtl: TimeInterval
   /// Whether `CheckResult.cacheTtlSeconds` overrides the per-tier default. Leave this on: it is the
-  /// server's fleet-wide invalidation lever (§5). Turning it off pins clients to local defaults and
+  /// server's fleet-wide invalidation lever. Turning it off pins clients to local defaults and
   /// makes a bad cached verdict un-revocable.
   public var honorsServerTtlOverride: Bool
   /// Optional cap on stored rows; `nil` means unbounded (lazy expiry plus the prune-on-open pass

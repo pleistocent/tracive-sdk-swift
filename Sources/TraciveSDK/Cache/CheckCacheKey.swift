@@ -1,13 +1,13 @@
 import CryptoKit
 import Foundation
 
-/// The primary key of a cached check: `SHA-256(searchQueryIndex)`, lowercase hex (§5).
+/// The primary key of a cached check: `SHA-256(searchQueryIndex)`, lowercase hex.
 ///
 /// ## Why the raw identifier is never the key
 /// `TraciveQuery.searchQueryIndex` embeds the identifier itself — `PHONE_+6281234567891`,
 /// `EMAIL_budi@example.com`, `BANK_IDN_BCA_32424242422`. Writing that into a database on the user's
 /// device would turn the cache into a plaintext register of every phone number, email and bank
-/// account the app has ever looked up, readable by anything that can reach the file. §11.3 forbids
+/// account the app has ever looked up, readable by anything that can reach the file. The SDK forbids
 /// it, so the SDK stores only the digest. The digest is enough to answer "have I seen this exact
 /// query before" and useless for enumerating what was looked up.
 ///

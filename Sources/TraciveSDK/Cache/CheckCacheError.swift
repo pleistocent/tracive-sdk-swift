@@ -12,7 +12,7 @@ import Foundation
 /// - A **write** failure is never fatal. The check already succeeded; the only loss is that the next
 ///   identical check costs another credit. Log and continue.
 /// - A **read** failure is never fatal either. Treat it as a miss and go to the server — except
-///   under `Source.cache`, where the caller surfaces `TraciveError.cacheMiss` (§5) rather than
+///   under `Source.cache`, where the caller surfaces `TraciveError.cacheMiss` rather than
 ///   answering with a silent empty result.
 ///
 /// Note what is *not* here: there is no `notFound`. A cache miss is `nil` from `read`, not an error;

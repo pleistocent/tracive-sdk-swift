@@ -1,6 +1,6 @@
 import Foundation
 
-/// Result of `GET /profile` (§4).
+/// Result of `GET /profile`.
 ///
 /// Every field except `sub` is optional: the granted OAuth scopes decide how much of the profile
 /// the server is willing to return, so a narrow grant legitimately yields a profile with only a

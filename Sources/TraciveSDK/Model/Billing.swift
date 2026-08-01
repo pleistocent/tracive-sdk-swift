@@ -1,6 +1,6 @@
 import Foundation
 
-/// Who paid for a check and how much it cost (§4).
+/// Who paid for a check and how much it cost.
 ///
 /// Billing is **never cached** — a cache hit costs nothing, so replaying a stored `Billing` would
 /// claim a charge that did not happen. See `CheckResult.cacheableCopy()`.
@@ -40,8 +40,8 @@ public struct Billing: Codable, Equatable, Hashable, Sendable {
 
 /// Which pot a check was charged against.
 ///
-/// phase 1 always sends `creditSource: "USER"` (§4). `PARTNER` exists because §7 defines an
-/// `insufficient_partner_balance` error and §4 defines `partnerBalanceRemaining`.
+/// phase 1 always sends `creditSource: "USER"`. `PARTNER` exists because the API defines an
+/// `insufficient_partner_balance` error and a `partnerBalanceRemaining` field.
 ///
 /// Unlike `RiskTier` this type keeps an `.other` escape hatch: an unknown credit source is
 /// bookkeeping metadata, so failing an entire fraud check over it would be a worse outcome than

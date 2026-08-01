@@ -5,13 +5,13 @@ import Foundation
 #endif
 
 /// The production `CheckCache`: system SQLite for storage, CryptoKit AES-GCM per row for
-/// confidentiality (§5, §11.6).
+/// confidentiality.
 ///
 /// ```swift
 /// let cache = try SQLiteCheckCache()                       // Application Support, Keychain key
 /// let cached = try cache.read(query)                       // nil when missing or stale
 /// try cache.write(serverResult, for: query)
-/// try cache.clear()                                        // §5's client.cache.clear()
+/// try cache.clear()                                        // backs client.cache.clear()
 /// ```
 ///
 /// ## What lands on disk
@@ -32,7 +32,7 @@ import Foundation
 ///
 /// ## Freshness: read is authoritative, prune is best-effort
 /// `read` decides staleness with the **current** `policy` applied to the decoded result, via
-/// `CachePolicy.isFresh(_:now:)` — so it honours a `cacheTtlSeconds` the server sent (§5's
+/// `CachePolicy.isFresh(_:now:)` — so it honours a `cacheTtlSeconds` the server sent (the
 /// fleet-wide invalidation lever) and reacts immediately to a policy change. `expires_at` is only an
 /// index for `prune`, computed from whatever policy was in force at write time. The split matters:
 /// prune may leave a stale row behind for a while, and read will still refuse to serve it. It can
@@ -45,7 +45,7 @@ import Foundation
 /// table because the Keychain was briefly unavailable would be an own goal.
 public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
 
-  /// Bump this to invalidate every stored row on upgrade (§5).
+  /// Bump this to invalidate every stored row on upgrade.
   ///
   /// Change it whenever the payload shape or the encryption format changes in a way an older row
   /// cannot satisfy. Nothing migrates: the table is dropped and recreated, because a cold cache
@@ -67,7 +67,7 @@ public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
   ///
   /// - Parameters:
   ///   - url: database file. Defaults to `Application Support/TraciveSDK/check-cache.sqlite3`.
-  ///   - policy: freshness rules. Defaults to the §5 tiers.
+  ///   - policy: freshness rules. Defaults to the per-tier TTLs documented on `CachePolicy`.
   ///   - keyStore: where the AES data key lives. Defaults to the Keychain, Secure Enclave-backed
   ///     where the device has one. **Tests must pass `EphemeralCacheKeyStore()`** — an unsigned
   ///     `swift test` binary either cannot reach the Keychain or prompts a human for it.
@@ -109,7 +109,7 @@ public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
 
     try configure()
     try migrate()
-    // Prune on open (§5). Best-effort: a store that cannot prune is still a usable store, and
+    // Prune on open. Best-effort: a store that cannot prune is still a usable store, and
     // refusing to open the cache because a `DELETE` failed would turn a housekeeping problem into a
     // billing one.
     _ = try? unlockedPrune()

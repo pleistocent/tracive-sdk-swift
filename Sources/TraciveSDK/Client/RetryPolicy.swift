@@ -1,13 +1,13 @@
 import Foundation
 
-/// When `TraciveClient` may send the same request twice, and how long it waits first (§7).
+/// When `TraciveClient` may send the same request twice, and how long it waits first.
 ///
 /// ## The rule that matters
 ///
 /// > "Never auto-retry a `checkScammer` on 5xx/timeout without an `Idempotency-Key`; a blind retry
 /// > risks a double charge."
 ///
-/// A Tracive check is **billed on every call, including a miss** (§3.2), and a 5xx or a timeout is
+/// A Tracive check is **billed on every call, including a miss**, and a 5xx or a timeout is
 /// precisely the case where the client cannot tell whether the charge landed. So the policy below
 /// is applied only to requests that are safe to repeat:
 ///

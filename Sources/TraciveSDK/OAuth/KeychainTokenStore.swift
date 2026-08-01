@@ -3,12 +3,12 @@ import Security
 
 /// The production `TraciveTokenStore`: one Keychain generic-password item per OAuth client.
 ///
-/// §6 forbids `UserDefaults` and plain files for these credentials, and the reason is concrete: a
+/// `UserDefaults` and plain files are forbidden for these credentials, and the reason is concrete: a
 /// refresh token in `UserDefaults` is in the app's unencrypted container, readable from any
 /// unencrypted device backup and from any jailbreak-level file browse. The Keychain item written
 /// here is protected by the device passcode-derived key and is excluded from iCloud sync.
 ///
-/// Uses Keychain Services directly — no third-party wrapper (§11.6).
+/// Uses Keychain Services directly — no third-party wrapper.
 public final class KeychainTokenStore: TraciveTokenStore, @unchecked Sendable {
 
   /// A Keychain call failed. `status` is the raw `OSStatus`; look it up with

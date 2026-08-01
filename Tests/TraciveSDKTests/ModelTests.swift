@@ -3,7 +3,7 @@ import XCTest
 @testable import TraciveSDK
 
 /// Model-layer contract tests: wire decoding, forward compatibility, cache projection, TTL rules,
-/// configuration surface and the §7 error map.
+/// configuration surface and the error map.
 ///
 /// No network. The Open API does not exist yet, so every payload here is a literal.
 final class ModelTests: XCTestCase {
@@ -94,13 +94,13 @@ final class ModelTests: XCTestCase {
     XCTAssertNil(result.cacheTtlSeconds)
   }
 
-  /// Forward compatibility (§4): a future-version server may add fields; shipped apps must not break.
+  /// Forward compatibility: a future-version server may add fields; shipped apps must not break.
   func testUnknownFieldsAreIgnored() throws {
     let json = """
       {
         "found": true,
         "riskTier": "CAUTION",
-        "tahap2ScoreBreakdown": { "velocity": 0.8, "graph": [1, 2, 3] },
+        "futureScoreBreakdown": { "velocity": 0.8, "graph": [1, 2, 3] },
         "anotherNewScalar": 42,
         "aNewNull": null
       }
@@ -287,9 +287,9 @@ final class ModelTests: XCTestCase {
 
   func testCreditSourceKeepsUnknownValuesInsteadOfFailing() throws {
     let billing = try decode(
-      Billing.self, #"{ "creditSource": "TAHAP2_POOL", "unitsCharged": 2, "partnerBalanceRemaining": 98 }"#)
-    XCTAssertEqual(billing.creditSource, .other("TAHAP2_POOL"))
-    XCTAssertEqual(billing.creditSource.rawValue, "TAHAP2_POOL")
+      Billing.self, #"{ "creditSource": "FUTURE_POOL", "unitsCharged": 2, "partnerBalanceRemaining": 98 }"#)
+    XCTAssertEqual(billing.creditSource, .other("FUTURE_POOL"))
+    XCTAssertEqual(billing.creditSource.rawValue, "FUTURE_POOL")
     XCTAssertEqual(billing.unitsCharged, 2)
     XCTAssertEqual(billing.partnerBalanceRemaining, 98)
 
@@ -376,7 +376,7 @@ final class ModelTests: XCTestCase {
     XCTAssertFalse(configuration.description.contains("secret"))
     XCTAssertTrue(configuration.description.contains("Authorization"))
 
-    // The exact message §2 requires Proxy-mode calls to fail with, until phase 2.
+    // The exact message every SDK must fail Proxy-mode calls with, until phase 2.
     XCTAssertEqual(TraciveError.proxyModeNotImplemented.kind, .notImplemented)
     XCTAssertEqual(
       TraciveError.proxyModeNotImplemented.errorDescription, "Proxy mode arrives in phase 2")
@@ -403,7 +403,7 @@ final class ModelTests: XCTestCase {
     }
   }
 
-  // MARK: - Error mapping (§7)
+  // MARK: - Error mapping
 
   func testErrorMappingTable() {
     let cases: [(Int, String, TraciveErrorKind)] = [
@@ -446,9 +446,9 @@ final class ModelTests: XCTestCase {
 
   /// An unrecognised code must never crash and must never lose the raw code.
   func testUnrecognisedCodesDegradeGracefully() {
-    let futureClientError = TraciveError.from(status: 400, code: "tahap2_new_rule")
+    let futureClientError = TraciveError.from(status: 400, code: "future_new_rule")
     XCTAssertEqual(futureClientError.kind, .unknown)
-    XCTAssertEqual(futureClientError.serverCode, "tahap2_new_rule")
+    XCTAssertEqual(futureClientError.serverCode, "future_new_rule")
 
     let serverError = TraciveError.from(status: 503, code: "upstream_unavailable")
     XCTAssertEqual(serverError.kind, .server)

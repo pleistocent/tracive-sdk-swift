@@ -1,7 +1,7 @@
 import Foundation
 
 /// One prepared authorization attempt: the URL to open plus the PKCE material that must survive
-/// until the callback arrives (§6 steps 1 and 4).
+/// until the callback arrives (steps 1 and 4).
 ///
 /// `description` redacts everything. The URL embeds `state` and `code_challenge`, and the verifier
 /// is the secret half of the exchange.
@@ -29,14 +29,14 @@ public struct AuthorizationRequest: Equatable, Hashable, Sendable, CustomStringC
   public var debugDescription: String { description }
 }
 
-/// Builds the `GET /oauth/authorize` URL (§4.2).
+/// Builds the `GET /oauth/authorize` URL.
 ///
 /// ## Why the host is not `api.tracive.id`
 ///
 /// The authorize URL is not an API call — it is an **App Link / Universal Link** that the Tracive
 /// app claims, so its host has to be a domain that ships an `apple-app-site-association`:
 /// `tracive.id` in production, `sandbox.tracive.id` in the sandbox, each claimed by the matching
-/// app flavour. §4.2 is explicit that the production authorize host must be `tracive.id` and not
+/// app flavour. The contract is explicit that the production authorize host must be `tracive.id` and not
 /// the third-party `chottu.link` fallback, because `state`, `code_challenge` and `partner_user_id`
 /// must not transit a processor.
 public enum AuthorizeURLBuilder {
@@ -69,7 +69,7 @@ public enum AuthorizeURLBuilder {
   /// server-side rejection at the consent step, not a local error — so set it.
   ///
   /// There is no `client_secret` and no API key here, and there is nowhere to put one: a public
-  /// mobile client cannot hold a secret, which is the whole reason PKCE exists (§11.1).
+  /// mobile client cannot hold a secret, which is the whole reason PKCE exists.
   public static func build(
     endpoint: URL,
     configuration: OAuthConfiguration,

@@ -6,7 +6,7 @@ import Foundation
 
 /// The seam over "can the OS open this?" and "open it".
 ///
-/// Two §6 requirements live behind it:
+/// Two requirements of the consent flow live behind it:
 ///
 /// 1. **The app-presence pre-check happens before any redirect.** If Tracive is not installed, the
 ///    SDK opens the clean install link and stops — it must not push the user at an authorize URL
@@ -14,7 +14,7 @@ import Foundation
 /// 2. **The authorize URL is opened with `UIApplication.open`, never a WebView.** App Links do not
 ///    fire from an in-app WebView — a bank app's habitual container would strand the user on the
 ///    fallback page even with Tracive installed — and RFC 8252 forbids WebViews for OAuth anyway.
-///    It is also **not** `ASWebAuthenticationSession`: v1 has no web consent at all (§4.2), so
+///    It is also **not** `ASWebAuthenticationSession`: v1 has no web consent at all, so
 ///    there is no web page to host.
 ///
 /// Both methods are `async` because the UIKit implementations must hop to the main actor.
@@ -29,7 +29,7 @@ public protocol TraciveAppLauncher: Sendable {
   func open(_ url: URL) async -> Bool
 }
 
-/// Which app to look for, and where the install funnel goes when it is missing (§4.2, §4.3).
+/// Which app to look for, and where the install funnel goes when it is missing.
 public enum TraciveAppPresence {
 
   /// Custom scheme of the production Tracive app (`com.pleistocent.tracive`).
@@ -60,11 +60,11 @@ public enum TraciveAppPresence {
     }
   }
 
-  /// The **clean** install link (§6 step 3).
+  /// The **clean** install link (step 3).
   ///
   /// It carries no OAuth parameters at all — no `state`, no `code_challenge`, no `redirect_uri`.
   /// That is a privacy requirement, not tidiness: chottu is a third-party service, and routing
-  /// consent parameters through a processor is exactly what §4.2 rules out for production. An
+  /// consent parameters through a processor is exactly what the contract rules out for production. An
   /// attribution tag naming the *client* is explicitly allowed, so `ref` carries the OAuth client
   /// id — the partner's own identifier, never the end user's.
   ///

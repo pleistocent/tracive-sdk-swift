@@ -1,6 +1,6 @@
 import Foundation
 
-/// The OAuth + PKCE half of the SDK (§6) — app-to-app, no web view, no browser in the happy path.
+/// The OAuth + PKCE half of the SDK — app-to-app, no web view, no browser in the happy path.
 ///
 /// ## The flow, end to end
 ///
@@ -23,7 +23,7 @@ import Foundation
 /// ## Why this is an actor
 ///
 /// Refresh must be **single-flight**. Tracive's refresh tokens rotate, and re-presenting a rotated
-/// token trips the server's reuse detection, which revokes the entire grant (§4.2). Two concurrent
+/// token trips the server's reuse detection, which revokes the entire grant. Two concurrent
 /// checks that both hit a 401 must therefore produce exactly *one* `POST /oauth/token`. The actor
 /// makes the "is a refresh already running?" check-and-set atomic, and the stored `Task` is what
 /// the second caller awaits instead of starting its own.
@@ -31,7 +31,7 @@ import Foundation
 /// ## There is no API key here
 ///
 /// Not in the authorize URL, not in the token request, not in the configuration. A public mobile
-/// client cannot keep a secret, so it is given none (§11.1).
+/// client cannot keep a secret, so it is given none.
 public actor TraciveOAuth {
 
   // MARK: - Configuration
@@ -77,8 +77,8 @@ public actor TraciveOAuth {
   /// - Parameters:
   ///   - transport: defaults to `URLSessionHTTPTransport`. Inject a fake in tests — the Open API
   ///     does not exist yet, so nothing in this SDK's test suite may touch a network.
-  ///   - tokenStore: defaults to `KeychainTokenStore` keyed on the client id. §6 forbids
-  ///     `UserDefaults` and plain files for these credentials.
+  ///   - tokenStore: defaults to `KeychainTokenStore` keyed on the client id. `UserDefaults` and
+  ///     plain files are forbidden for these credentials.
   ///   - appLauncher: defaults to `UIApplication` on iOS and to a launcher that reports "nothing is
   ///     installed" elsewhere, so `authorize()` degrades to `.appNotInstalled` on macOS rather than
   ///     pretending.
@@ -129,7 +129,7 @@ public actor TraciveOAuth {
   ///
   /// `authorize()` calls this internally. It is public for a host app that wants to drive the
   /// launch itself (a custom presentation, a deferred hand-off) — but it does **not** perform the
-  /// app-presence pre-check, so a caller using it directly owns step 2 of §6.
+  /// app-presence pre-check, so a caller using it directly owns step 2 of the flow above.
   ///
   /// Calling it discards any previously prepared attempt: only one `state` can be outstanding, or
   /// a stale callback could satisfy the check.
@@ -164,7 +164,7 @@ public actor TraciveOAuth {
     // Never leave an earlier caller suspended forever.
     resumePending(with: .failed(.sdk("authorization_superseded", "A newer authorize() replaced this attempt.")))
 
-    // Step 2 of §6: pre-check *before* any redirect. Getting this wrong sends users carrying live
+    // Step 2: pre-check *before* any redirect. Getting this wrong sends users carrying live
     // consent parameters to a browser fallback page.
     let probe = TraciveAppPresence.probeURL(for: environment)
     guard await appLauncher.canOpen(probe) else {
@@ -222,7 +222,7 @@ public actor TraciveOAuth {
     )
   }
 
-  /// Completes the flow from the redirect URL (§6 steps 5–6).
+  /// Completes the flow from the redirect URL (steps 5–6).
   ///
   /// Call this from `application(_:open:options:)` or
   /// `scene(_:openURLContexts:)` / `scene(_:continue:)`. The result is both returned and delivered
@@ -269,7 +269,7 @@ public actor TraciveOAuth {
       )
     }
 
-    // A confidential client stops here by design (§4.2): the exchange needs a `client_secret`, and
+    // A confidential client stops here by design: the exchange needs a `client_secret`, and
     // a mobile binary is not allowed to hold one. Nothing is stored locally.
     if configuration.clientType == .confidential {
       return finish(
@@ -330,7 +330,7 @@ public actor TraciveOAuth {
   /// Throws `.invalidToken` with the code `no_grant` when nothing is stored — the host app should
   /// send the user through `authorize()`.
   ///
-  /// This deliberately does **not** refresh pre-emptively on a locally-computed expiry. §6 puts
+  /// This deliberately does **not** refresh pre-emptively on a locally-computed expiry. The SDK puts
   /// refresh on the 401 `expired_token` response, and the server's clock is the one that decides:
   /// refreshing off a device clock that has drifted forward would burn a refresh-token rotation
   /// (and edge the grant closer to reuse detection) for nothing.
@@ -346,7 +346,7 @@ public actor TraciveOAuth {
     return tokens.accessToken
   }
 
-  /// Refreshes the access token, **single-flight** (§6).
+  /// Refreshes the access token, **single-flight**.
   ///
   /// - Parameter staleAccessToken: the token whose use produced the 401. If the stored token has
   ///   already moved on, some other caller refreshed while this one was in flight and the fresh
@@ -409,7 +409,7 @@ public actor TraciveOAuth {
     try? tokenStore.clear()
   }
 
-  /// Revokes the grant and forgets it locally (§6).
+  /// Revokes the grant and forgets it locally.
   ///
   /// `POST /v1/oauth/revoke` is **best effort** — offline, 500, or a refused revoke all still clear
   /// local state. A sign-out that leaves a token on the device because the network was down is the

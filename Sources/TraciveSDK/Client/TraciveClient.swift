@@ -1,6 +1,6 @@
 import Foundation
 
-/// The SDK's entry point (§2, §4).
+/// The SDK's entry point.
 ///
 /// ```swift
 /// let tracive = TraciveClient(
@@ -30,13 +30,13 @@ import Foundation
 ///    the Tracive API. Everything here is written against the documented
 ///    contract and verified against an injected fake transport; no test in this package opens a
 ///    socket.
-/// 2. **Every call is billed, including a miss** (§3.2). That is why queries are validated locally
+/// 2. **Every call is billed, including a miss**. That is why queries are validated locally
 ///    before a request goes out, why the cache exists, and why a 5xx is not blindly retried.
-/// 3. **There is no API-key parameter, in any mode** (§11.1). A mobile binary cannot keep a secret.
+/// 3. **There is no API-key parameter, in any mode**. A mobile binary cannot keep a secret.
 ///
 /// ## Do not poll `credits()`
 ///
-/// §3.3 is explicit: do **not** call `credits()` before each check. Handle the 402 from
+/// The rule is explicit: do **not** call `credits()` before each check. Handle the 402 from
 /// `checkScammer` instead — it saves one round trip per transaction, and a balance read a moment
 /// earlier can be stale by the time the check lands anyway.
 ///
@@ -57,7 +57,7 @@ public actor TraciveClient {
   /// The `source` used when a call does not name one.
   public nonisolated let defaultSource: Source
   public nonisolated let retryPolicy: RetryPolicy
-  /// The local encrypted result cache (§5). Backs `client.cache.clear()`.
+  /// The local encrypted result cache. Backs `client.cache.clear()`.
   ///
   /// Never optional: `NoOpCheckCache` stands in when caching is off, so every path here can call
   /// the cache unconditionally instead of threading an optional through the check flow.
@@ -79,7 +79,7 @@ public actor TraciveClient {
   /// - Parameters:
   ///   - mode: `.oauth(…)` today. `.proxy(…)` exists so adding it in phase 2 is not a breaking
   ///     change; every call in that mode throws `TraciveError.notImplemented`.
-  ///   - cachePolicy: TTL rules (§5). Used to build the default cache; ignored when `cache` is
+  ///   - cachePolicy: TTL rules. Used to build the default cache; ignored when `cache` is
   ///     supplied, since an injected store carries its own policy.
   ///   - transport: test seam. Defaults to `URLSessionHTTPTransport`.
   ///   - clock: test seam for TTL and backoff. Defaults to wall time.
@@ -151,12 +151,12 @@ public actor TraciveClient {
 
   // MARK: - Checks
 
-  /// Checks one identifier against Tracive's scammer index (§4).
+  /// Checks one identifier against Tracive's scammer index.
   ///
   /// - Parameters:
   ///   - query: a validated, folded key. Building it already rejected anything that could not hit,
   ///     which matters commercially: a miss is billed, so a key that can never hit is a wasted
-  ///     credit (§3.2).
+  ///     credit.
   ///   - source: cache-versus-network strategy. `nil` uses `defaultSource`.
   ///   - detail: `.minimal` (default) or `.full`. `.full` adds `topChronologies` and `comments`,
   ///     needs a contractual rider server-side, and is **never** cached.
@@ -173,7 +173,7 @@ public actor TraciveClient {
   ///     `Idempotency-Key`.
   ///   - idempotencyKey: pass one if you intend to retry. **Without it the SDK will not retry** a
   ///     5xx, a 429 or a timeout, because it cannot tell whether the first attempt was charged
-  ///     (§7). The same key is reused on every attempt, which is what lets the server deduplicate.
+  ///. The same key is reused on every attempt, which is what lets the server deduplicate.
   ///
   ///     Note that the request always carries *some* `Idempotency-Key`: when you supply none the
   ///     SDK generates a per-call one, so that its own replay after a 401 token refresh can be
@@ -225,7 +225,7 @@ public actor TraciveClient {
         return try await fetchAndStore(
           query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
       } catch let error as TraciveError {
-        // "Network first, fall back to cache when it fails" (§11.2) means a *transport-shaped*
+        // "Network first, fall back to cache when it fails" means a *transport-shaped*
         // failure — offline, 5xx, rate limited. A 402 or a 403 is a real answer about the caller's
         // account, and quietly serving a cached verdict instead would hide a billing or permission
         // problem until it became someone else's incident.
@@ -235,7 +235,7 @@ public actor TraciveClient {
     }
   }
 
-  /// `GET /v1/credits` — the user's remaining subscription credits (§4).
+  /// `GET /v1/credits` — the user's remaining subscription credits.
   ///
   /// Read the warning on this type: do not call this before each check.
   public func credits() async throws -> CreditsInfo {
@@ -250,10 +250,10 @@ public actor TraciveClient {
     return try TraciveResponseMapper.decode(CreditsInfo.self, from: response, now: clock.now)
   }
 
-  /// `GET /v1/profile` — the minimal profile behind the grant (§4).
+  /// `GET /v1/profile` — the minimal profile behind the grant.
   ///
   /// `sub` is a pairwise pseudonymous id: different partners see different values for the same
-  /// Tracive user, and the underlying Firebase uid never leaves the server.
+  /// Tracive user, and the underlying account id never leaves the server.
   public func profile() async throws -> ProfileInfo {
     try requireOAuthMode()
     let request = HTTPRequest(
@@ -267,7 +267,7 @@ public actor TraciveClient {
 
   // MARK: - Cache
 
-  /// Empties the local result cache. Equivalent to `client.cache.clear()` (§5).
+  /// Empties the local result cache. Equivalent to `client.cache.clear()`.
   public func clearCache() throws {
     try cache.clear()
   }
@@ -293,7 +293,7 @@ public actor TraciveClient {
     return await oauth.handleCallback(url: url)
   }
 
-  /// Revokes the grant best-effort and clears local tokens regardless of the outcome (§6).
+  /// Revokes the grant best-effort and clears local tokens regardless of the outcome.
   public func signOut() async {
     await oauth?.signOut()
   }
@@ -310,7 +310,7 @@ public actor TraciveClient {
 
   private func requireOAuthMode() throws {
     // Proxy mode is phase 2. The type exists in the surface so adding it later is not a breaking
-    // change (§2); until then every call fails with the exact message the spec names.
+    // change; until then every call fails with the exact message the spec names.
     guard mode.oauthConfiguration != nil, oauth != nil else {
       throw TraciveError.proxyModeNotImplemented
     }
@@ -368,7 +368,7 @@ public actor TraciveClient {
       body: encoded
     )
 
-    // §7's retry rule, applied at the only place it matters: a check may be repeated only when the
+    // The retry rule, applied at the only place it matters: a check may be repeated only when the
     // caller gave us a key that lets the server deduplicate the charge.
     let isRetryable = callerKey != nil
     let response = try await sendAuthorized(request, isRetryable: isRetryable)
@@ -390,7 +390,7 @@ public actor TraciveClient {
   ///
   /// - Parameter isRetryable: whether repeating this exact request is safe. `true` for GETs and for
   ///   a check carrying an `Idempotency-Key`; `false` otherwise, in which case a 5xx, a 429 or a
-  ///   timeout is surfaced immediately rather than risking a second charge (§7).
+  ///   timeout is surfaced immediately rather than risking a second charge.
   private func sendAuthorized(
     _ request: HTTPRequest,
     isRetryable: Bool
@@ -424,7 +424,7 @@ public actor TraciveClient {
         switch info.code {
         case "grant_revoked":
           // Usually the server's refresh-token reuse detection firing. The grant is gone; keeping
-          // the tokens would only produce more failures. Do not retry (§6).
+          // the tokens would only produce more failures. Do not retry.
           await oauth.clearStoredTokens()
           throw TraciveError.grantRevoked(info)
 

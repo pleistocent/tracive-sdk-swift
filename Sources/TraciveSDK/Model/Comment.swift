@@ -1,6 +1,6 @@
 import Foundation
 
-/// A free-text comment left on a scammer record (`detail = .full` only, §4).
+/// A free-text comment left on a scammer record (`detail = .full` only).
 ///
 /// `date` is a **String** for the same reason as `Chronology.incidentDate`: the server sends a
 /// display date, not a normalised instant.

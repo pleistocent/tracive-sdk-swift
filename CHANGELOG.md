@@ -83,7 +83,7 @@ ship the wiring now; expect real verdicts when the backend lands.
 
 **Errors**
 
-- `TraciveError` covering the §3.5 mapping. An unrecognised server code degrades to `.server` or
+- `TraciveError` covering the documented status/code mapping. An unrecognised server code degrades to `.server` or
   `.unknown` carrying the raw code — it never crashes and is never dropped.
 - `TraciveError.rateLimited` reads the `Retry-After` header, in both its seconds and HTTP-date forms.
 

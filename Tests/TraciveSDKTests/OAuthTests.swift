@@ -3,7 +3,7 @@ import XCTest
 
 @testable import TraciveSDK
 
-/// The OAuth + PKCE flow (§6): the RFC 7636 vector, the authorize URL, the app-presence pre-check
+/// The OAuth + PKCE flow: the RFC 7636 vector, the authorize URL, the app-presence pre-check
 /// and its clean install-link fallback, `state` verification, both client types, token rotation,
 /// and single-flight refresh.
 ///
@@ -25,7 +25,7 @@ final class OAuthTests: XCTestCase {
 
   func testChallengeMethodIsS256Only() {
     // `plain` makes the challenge *be* the verifier, so anyone who can read the authorize URL can
-    // finish the exchange. Tracive's server rejects it and so does this SDK (§6 step 1).
+    // finish the exchange. Tracive's server rejects it and so does this SDK (step 1).
     XCTAssertEqual(PKCE.codeChallengeMethod, "S256")
   }
 
@@ -80,7 +80,7 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(query["code_challenge"], request.codeChallenge)
     XCTAssertEqual(query["state"], request.state)
     // Required by the authorization server for the 1:1 account link, even though the frozen SDK
-    // surface makes it optional (§4.2).
+    // surface makes it optional.
     XCTAssertEqual(query["partner_user_id"], "partner-user-1")
   }
 
@@ -90,7 +90,7 @@ final class OAuthTests: XCTestCase {
     let request = try await oauth.makeAuthorizationRequest()
     let names = Set(Self.queryItems(of: request.url).keys)
 
-    // The hard design invariant of §11.1: a mobile binary holds no Tracive credential, in any mode.
+    // The hard design invariant: a mobile binary holds no Tracive credential, in any mode.
     XCTAssertFalse(names.contains("client_secret"))
     XCTAssertFalse(names.contains("api_key"))
     XCTAssertFalse(names.contains("apiKey"))
@@ -169,7 +169,7 @@ final class OAuthTests: XCTestCase {
 
   func testAuthorizeHostIsEnvironmentSpecific() {
     // Sandbox and production are parallel worlds: the dev app claims `sandbox.tracive.id` and the
-    // store app claims `tracive.id`, so a sandbox consent can never land in a production app (§4.3).
+    // store app claims `tracive.id`, so a sandbox consent can never land in a production app.
     XCTAssertEqual(
       AuthorizeURLBuilder.defaultEndpoint(for: .production).absoluteString,
       "https://tracive.id/oauth/authorize"
@@ -193,7 +193,7 @@ final class OAuthTests: XCTestCase {
     }
   }
 
-  // MARK: - App presence and the install funnel (§6 steps 2–3)
+  // MARK: - App presence and the install funnel (steps 2–3)
 
   func testMissingAppOpensTheInstallLinkAndStopsTheFlow() async throws {
     let launcher = FakeAppLauncher(canOpenAnything: false)
@@ -213,7 +213,7 @@ final class OAuthTests: XCTestCase {
     let url = TraciveAppPresence.installURL(clientId: "test-client")
     let query = Self.queryItems(of: url)
 
-    // §4.2 forbids routing consent parameters through a third-party processor. An attribution tag
+    // Routing consent parameters through a third-party processor is forbidden. An attribution tag
     // naming the *client* is explicitly allowed; nothing about the user or the flow is.
     for forbidden in [
       "state", "code_challenge", "code_challenge_method", "redirect_uri", "client_id",
@@ -286,7 +286,7 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(cancelled.serverCode, "authorization_cancelled")
   }
 
-  // MARK: - Callback handling (§6 step 5)
+  // MARK: - Callback handling (step 5)
 
   func testStateMismatchFailsTheFlow() async throws {
     let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
@@ -337,7 +337,7 @@ final class OAuthTests: XCTestCase {
     guard case .failed(let error) = result else {
       return XCTFail("Expected failure, got \(result).")
     }
-    // §7: an unrecognised code must reach the caller intact rather than crash or be swallowed.
+    // An unrecognised code must reach the caller intact rather than crash or be swallowed.
     XCTAssertEqual(error.serverCode, "invalid_scope")
     XCTAssertEqual(error.info?.message, "unknown scope")
   }
@@ -370,7 +370,7 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
   }
 
-  // MARK: - Public client exchange (§6 step 6)
+  // MARK: - Public client exchange (step 6)
 
   func testPublicClientExchangesTheCodeAndStoresTheGrant() async throws {
     let store = InMemoryTokenStore()
@@ -442,7 +442,7 @@ final class OAuthTests: XCTestCase {
     guard case .failed(let error) = result else {
       return XCTFail("Expected failure, got \(result).")
     }
-    // The token endpoint speaks RFC 6749's flat error shape, not Tracive's envelope (§3.5).
+    // The token endpoint speaks RFC 6749's flat error shape, not Tracive's envelope.
     XCTAssertEqual(error.serverCode, "invalid_grant")
     XCTAssertNil(try store.load())
   }
@@ -460,7 +460,7 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(error.serverCode, "token_storage_failed")
   }
 
-  // MARK: - Confidential client (§6 step 6)
+  // MARK: - Confidential client (step 6)
 
   func testConfidentialClientStopsAtTheCode() async throws {
     let store = InMemoryTokenStore()
@@ -555,7 +555,7 @@ final class OAuthTests: XCTestCase {
 
     XCTAssertEqual(tokens.compactMap { $0 }.count, 8)
     XCTAssertTrue(tokens.allSatisfy { $0 == "access-2" })
-    // One rotation, not eight. Eight would trip reuse detection and revoke the grant (§4.2).
+    // One rotation, not eight. Eight would trip reuse detection and revoke the grant.
     XCTAssertEqual(transport.callCount, 1)
   }
 
@@ -620,7 +620,7 @@ final class OAuthTests: XCTestCase {
 
     await oauth.signOut()
 
-    // §6 says best-effort. A sign-out that leaves a live token on the device because the network
+    // Revocation is best-effort. A sign-out that leaves a live token on the device because the network
     // was down is the worse of the two failures.
     XCTAssertNil(try store.load())
   }

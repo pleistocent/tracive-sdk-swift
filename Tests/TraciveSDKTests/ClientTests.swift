@@ -2,11 +2,11 @@ import XCTest
 
 @testable import TraciveSDK
 
-/// `TraciveClient` behaviour: request shape, cache routing (§5), the retry rule that protects the
-/// caller's credits (§7), and the single-flight 401 refresh (§6).
+/// `TraciveClient` behaviour: request shape, cache routing, the retry rule that protects the
+/// caller's credits, and the single-flight 401 refresh.
 ///
-/// **Nothing here touches a network.** The Tracive Open API is not live yet — no
-/// function, no `/v1/*` routes — so every response is scripted through `FakeHTTPTransport`. That is
+/// **Nothing here touches a network.** The Tracive Open API is not live yet — there is no
+/// deployed `/v1/*` route — so every response is scripted through `FakeHTTPTransport`. That is
 /// not a limitation of the suite; it is the only way this SDK can be specified at all right now,
 /// and it stays true after the backend ships.
 ///
@@ -27,7 +27,7 @@ final class ClientTests: XCTestCase {
       try await client.checkScammer(TestQueries.phone)
     }
     XCTAssertEqual(checkError?.kind, .notImplemented)
-    // The spec fixes this string so all three SDKs say the same thing (§2).
+    // The spec fixes this string so all three SDKs say the same thing.
     XCTAssertEqual(checkError?.errorDescription, "Proxy mode arrives in phase 2")
 
     let creditsError = await expectTraciveError { try await client.credits() }
@@ -55,7 +55,7 @@ final class ClientTests: XCTestCase {
     XCTAssertNil(client.oauth)
   }
 
-  // MARK: - Request shape (§4)
+  // MARK: - Request shape
 
   func testCheckRequestMatchesTheSpecifiedWireFormat() async throws {
     let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
@@ -78,7 +78,7 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(body["detail"] as? String, "minimal")
     XCTAssertEqual(body["query"] as? String, "PHONE_+6281234567891")
     // `input` is the server-normalised path; the SDK has already folded the key and that same
-    // folded string is the cache key, so sending `input` would let the two sides drift (§4).
+    // folded string is the cache key, so sending `input` would let the two sides drift.
     XCTAssertNil(body["input"])
     // Omitted at minimal detail: the server ignores it there, and a stray field changes the
     // payload behind an `Idempotency-Key`.
@@ -201,7 +201,7 @@ final class ClientTests: XCTestCase {
   }
 
   func testUnknownResponseFieldsAreIgnored() async throws {
-    // Forward compatibility (§4): a future-version server adding fields must not break a shipped app.
+    // Forward compatibility: a future-version server adding fields must not break a shipped app.
     let json = """
       {
         "found": true,
@@ -232,7 +232,7 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(result.origin, .server)
   }
 
-  // MARK: - Cache routing (§5)
+  // MARK: - Cache routing
 
   func testCacheFirstServesTheSecondCallWithoutNetworkIO() async throws {
     let clock = RecordingClock()
@@ -245,7 +245,7 @@ final class ClientTests: XCTestCase {
 
     XCTAssertEqual(first.origin, .server)
     XCTAssertEqual(second.origin, .cache)
-    // The whole economic point of §5: the second check costs nothing.
+    // The whole economic point of the cache: the second check costs nothing.
     XCTAssertEqual(transport.callCount, 1)
     XCTAssertEqual(second.riskTier, first.riskTier)
   }
@@ -285,7 +285,7 @@ final class ClientTests: XCTestCase {
   func testCachedEntryExpiresOnTheTierTTL() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
-    // riskTier NONE → 1 hour by §5, the shortest window: today's clean number is tomorrow's
+    // riskTier NONE → 1 hour, the shortest window: today's clean number is tomorrow's
     // scammer, so a clean verdict must go stale fastest.
     let transport = FakeHTTPTransport { _, _ in
       .ok(json: #"{"found":false,"riskTier":"NONE","reportTotal":0}"#)
@@ -308,7 +308,7 @@ final class ClientTests: XCTestCase {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
     // HIGH would normally be cached for thirty days; the server says ten seconds. `cacheTtlSeconds`
-    // is the fleet-wide invalidation lever (§5) — if this test fails, Tracive has lost its only way
+    // is the fleet-wide invalidation lever — if this test fails, Tracive has lost its only way
     // to revoke a bad verdict without shipping an SDK release.
     let transport = FakeHTTPTransport { _, _ in
       .ok(json: #"{"found":true,"riskTier":"HIGH","reportTotal":9,"cacheTtlSeconds":10}"#)
@@ -352,7 +352,7 @@ final class ClientTests: XCTestCase {
     // of the three SDKs.
     //
     // The cache key is `SHA-256(searchQueryIndex)` — the query **alone**, not
-    // `(query, detail, locale)` (§5). A `.cacheFirst` request therefore hits on whatever was stored
+    // `(query, detail, locale)`. A `.cacheFirst` request therefore hits on whatever was stored
     // for that query regardless of the `detail` asked for, and since full-detail content is never
     // cached, a `.full` request answered from cache comes back with `comments` and
     // `topChronologies` nil. That is indistinguishable from "full detail returned nothing".
@@ -538,7 +538,7 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 0)
   }
 
-  // MARK: - Retry policy (§7)
+  // MARK: - Retry policy
 
   func testCheckIsNotRetriedOnFiveHundredWithoutAnIdempotencyKey() async throws {
     let transport = FakeHTTPTransport { _, _ in .error(status: 503, code: nil) }
@@ -674,7 +674,7 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 2)
   }
 
-  // MARK: - 401 handling (§6)
+  // MARK: - 401 handling
 
   func testExpiredTokenTriggersOneRefreshAndOneReplay() async throws {
     let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
@@ -707,7 +707,7 @@ final class ClientTests: XCTestCase {
     let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
 
     XCTAssertEqual(error?.kind, .grantRevoked)
-    // §6: clear the tokens and do not retry. Re-presenting a revoked grant is what reuse detection
+    // Clear the tokens and do not retry. Re-presenting a revoked grant is what reuse detection
     // is watching for.
     XCTAssertNil(try store.load())
     XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 0)
@@ -721,7 +721,7 @@ final class ClientTests: XCTestCase {
 
     let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
 
-    // §6 puts auto-refresh on `expired_token` specifically. A malformed or foreign token is not
+    // Auto-refresh is on `expired_token` specifically. A malformed or foreign token is not
     // going to be fixed by rotating ours.
     XCTAssertEqual(error?.kind, .invalidToken)
     XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 0)
@@ -748,7 +748,7 @@ final class ClientTests: XCTestCase {
 
   func testConcurrentExpiredTokensProduceExactlyOneRefresh() async throws {
     // The failure this guards against is not a wasted request: presenting a rotated refresh token
-    // a second time trips the server's **reuse detection**, which revokes the entire grant (§4.2).
+    // a second time trips the server's **reuse detection**, which revokes the entire grant.
     // A racing refresh is therefore a logout for the user, not a retry.
     let concurrency = 6
     let gate = TestGate()
@@ -819,7 +819,7 @@ final class ClientTests: XCTestCase {
   }
 
   func testNoRequestOnAnyEndpointCarriesAnAPIKey() async throws {
-    // §11.1's hard invariant, asserted at the wire rather than at the type level. There is no
+    // The no-credential invariant, asserted at the wire rather than at the type level. There is no
     // API-key parameter in the public surface — but the check that matters to a bank's security
     // review is that nothing key-shaped actually leaves the device, on any route, in any mode.
     // A type-level absence can be re-introduced by one header line; this test is what catches that.
@@ -948,7 +948,7 @@ extension HTTPResponse {
     )
   }
 
-  /// A failure carrying Tracive's error envelope, `{"error":{"code","message","checkId"}}` (§7).
+  /// A failure carrying Tracive's error envelope, `{"error":{"code","message","checkId"}}`.
   static func error(
     status: Int,
     code: String?,
@@ -964,7 +964,7 @@ extension HTTPResponse {
     return HTTPResponse(status: status, headers: headers, body: Data(json.utf8))
   }
 
-  /// A failure carrying RFC 6749's flat body, which is what the OAuth endpoints use (§3.5).
+  /// A failure carrying RFC 6749's flat body, which is what the OAuth endpoints use.
   static func oauthError(
     status: Int,
     error: String,

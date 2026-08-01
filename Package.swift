@@ -6,7 +6,7 @@ import PackageDescription
 // ## Zero third-party dependencies, by design
 //
 // There is deliberately **no `dependencies:` array** on this package, and there never should be.
-// Per plan §11.6 that is the Swift SDK's headline property: a partner integrating a fraud-check SDK
+// That is the Swift SDK's headline property: a partner integrating a fraud-check SDK
 // is taking on our supply chain, and every transitive package is another party who can ship code
 // into their app. Everything the SDK needs already lives in the platform:
 //
@@ -19,7 +19,7 @@ import PackageDescription
 // | Key storage | Security (Keychain) + Secure Enclave |
 //
 // In particular there is **no SQLCipher**: the encryption story here is per-row AES-GCM with a
-// Keychain-held data key (§11.6), not an encrypted database file. See `Docs/caching.md`.
+// Keychain-held data key, not an encrypted database file. See `Docs/caching.md`.
 let package = Package(
   name: "TraciveSDK",
   platforms: [

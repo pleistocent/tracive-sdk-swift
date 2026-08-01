@@ -1,6 +1,6 @@
 import Foundation
 
-/// Why a query could not be built (§3).
+/// Why a query could not be built.
 ///
 /// The raw values are the exact `reason` strings from `query-grammar-vectors.json`, which is the
 /// cross-language anti-drift contract: Kotlin, Flutter, Swift and the backend all use these
@@ -28,7 +28,7 @@ public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
 /// Thrown by every `TraciveQuery` builder when the input cannot produce a key that could hit.
 ///
 /// Validation runs **before** any network call: a key that cannot hit still costs a credit if it is
-/// sent (§3.2), so a rejected query is a saved credit.
+/// sent, so a rejected query is a saved credit.
 ///
 /// The error deliberately carries **only** the reason — never the offending input. The rejected
 /// values are phone numbers, emails and account numbers, and this type ends up in logs.

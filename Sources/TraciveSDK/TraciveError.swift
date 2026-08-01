@@ -1,6 +1,6 @@
 import Foundation
 
-/// Everything the SDK can fail with (§7).
+/// Everything the SDK can fail with.
 ///
 /// The server's error envelope is `{"error":{"code","message","checkId"}}`; `TraciveError.from`
 /// turns an HTTP status plus that `code` into one of these cases. An **unrecognised** code never
@@ -9,7 +9,7 @@ import Foundation
 /// intact.
 public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, LocalizedError {
 
-  /// A surface that exists but is not wired up yet — today, only Proxy mode (§2, phase 2).
+  /// A surface that exists but is not wired up yet — today, only Proxy mode (phase 2).
   case notImplemented(String)
 
   // 400
@@ -19,13 +19,13 @@ public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, L
 
   // 401
   case invalidToken(TraciveErrorInfo)
-  /// The access token expired. Handled internally by the single-flight refresh (§6); it only
+  /// The access token expired. Handled internally by the single-flight refresh; it only
   /// reaches a caller when the refresh itself fails.
   case expiredToken(TraciveErrorInfo)
   /// The whole grant was revoked — often by the server's refresh-token reuse detection. Stored
   /// tokens are cleared and the flow must restart from consent. **Do not retry.**
   case grantRevoked(TraciveErrorInfo)
-  /// Defined by the server contract for API-key callers. The SDK never sends an API key (§11.1),
+  /// Defined by the server contract for API-key callers. The SDK never sends an API key,
   /// so seeing this means a proxy in front of Tracive sent a bad one.
   case invalidApiKey(TraciveErrorInfo)
 
@@ -57,11 +57,11 @@ public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, L
   case unknown(status: Int?, info: TraciveErrorInfo)
 
   /// `source = .cache` was requested and there was no fresh entry. Surfaced explicitly rather than
-  /// answering with a silent empty result (§5).
+  /// answering with a silent empty result.
   case cacheMiss
 
   /// The OAuth callback's `state` did not match the one we generated — a possible CSRF attempt, so
-  /// the flow is abandoned rather than completed (§6).
+  /// the flow is abandoned rather than completed.
   case stateMismatch
 
   /// A query could not be built. Lifted from `TraciveQueryError` for call sites that catch one
@@ -70,7 +70,7 @@ public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, L
 
   // MARK: - Convenience
 
-  /// The exact message the spec requires Proxy-mode calls to fail with (§2).
+  /// The exact message the spec requires Proxy-mode calls to fail with.
   public static let proxyModeNotImplemented = TraciveError.notImplemented(
     "Proxy mode arrives in phase 2"
   )
@@ -125,7 +125,7 @@ public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, L
   /// Whether the failure *could* succeed on a later attempt.
   ///
   /// This is not permission to auto-retry. A `checkScammer` retried on 5xx or a timeout **without**
-  /// an `Idempotency-Key` risks a double charge (§7), so a retrying caller must pass one.
+  /// an `Idempotency-Key` risks a double charge, so a retrying caller must pass one.
   public var isTransient: Bool {
     switch self {
     case .network, .rateLimited: return true
@@ -136,7 +136,7 @@ public enum TraciveError: Error, @unchecked Sendable, CustomStringConvertible, L
 
   // MARK: - Mapping
 
-  /// Maps an HTTP status plus a parsed error envelope onto a typed error, per the §7 table.
+  /// Maps an HTTP status plus a parsed error envelope onto a typed error, per the table below.
   ///
   /// - Parameters:
   ///   - status: HTTP status code.
@@ -269,7 +269,7 @@ public enum TraciveErrorKind: String, CaseIterable, Hashable, Sendable {
   case invalidQuery
 }
 
-/// Which balance ran out (§7, HTTP 402).
+/// Which balance ran out (HTTP 402).
 public enum InsufficientCreditsKind: String, CaseIterable, Hashable, Sendable {
   /// `insufficient_user_credits` — the end user's own credits.
   case userCredits = "insufficient_user_credits"
@@ -279,7 +279,7 @@ public enum InsufficientCreditsKind: String, CaseIterable, Hashable, Sendable {
   case partnerBalance = "insufficient_partner_balance"
 }
 
-/// The server's error envelope: `{"error":{"code","message","checkId"}}` (§7).
+/// The server's error envelope: `{"error":{"code","message","checkId"}}`.
 public struct TraciveErrorInfo: Codable, Equatable, Hashable, Sendable {
   public let code: String?
   public let message: String?

@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 
-/// Supplies the AES-256 data key that encrypts every cached payload (§5, §11.6).
+/// Supplies the AES-256 data key that encrypts every cached payload.
 ///
 /// The key is fetched lazily and may be cached in memory by an implementation, so this is called on
 /// the hot path of every read and write.
@@ -23,7 +23,7 @@ public protocol CacheKeyStore: Sendable {
 // MARK: - Keychain
 
 /// The production key store: an AES-256 data key held in the Keychain, **Secure Enclave-backed when
-/// the device has one** (§5).
+/// the device has one**.
 ///
 /// ## What is actually stored
 /// One `kSecClassGenericPassword` item, tagged with a one-byte format marker:

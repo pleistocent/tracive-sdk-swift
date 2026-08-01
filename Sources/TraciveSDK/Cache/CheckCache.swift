@@ -1,6 +1,6 @@
 import Foundation
 
-/// The local result cache (§5).
+/// The local result cache.
 ///
 /// A cache hit costs **zero credits and performs zero network I/O**, which is the entire point: the
 /// same phone number gets checked repeatedly in a real app, and every avoided round trip is a
@@ -20,7 +20,7 @@ import Foundation
 ///
 /// ## Errors and misses
 /// A miss is `nil`, not an error. `TraciveError.cacheMiss` is raised by the *client* when
-/// `Source.cache` was requested and the read came back empty (§5) — the store has no idea which
+/// `Source.cache` was requested and the read came back empty — the store has no idea which
 /// `Source` was asked for. Storage faults throw `CheckCacheError`; see that type for how callers
 /// should treat them (short version: never fatal).
 ///
@@ -36,7 +36,7 @@ public protocol CheckCache: AnyObject, Sendable {
 
   /// The freshest cached result for `key`, or `nil` when there is no entry or the entry has expired.
   ///
-  /// Expiry is evaluated lazily here (§5), so an entry that went stale while the app was backgrounded
+  /// Expiry is evaluated lazily here, so an entry that went stale while the app was backgrounded
   /// is never served.
   func read(_ key: CheckCacheKey) throws -> CheckResult?
 
@@ -48,7 +48,7 @@ public protocol CheckCache: AnyObject, Sendable {
   /// Deletes one entry. A key that is not present is not an error.
   func remove(_ key: CheckCacheKey) throws
 
-  /// Deletes everything. This is `client.cache.clear()` from §5.
+  /// Deletes everything. This is what `client.cache.clear()` calls.
   func clear() throws
 
   /// Deletes expired entries and enforces `policy.maxEntries`.
@@ -84,7 +84,7 @@ extension CheckCache {
   /// mean "go to the server". Returns `nil` on both a miss and a failure.
   ///
   /// Do **not** use this to serve `Source.cache`: that mode must be able to tell a miss from a
-  /// fault, because §5 requires it to surface `TraciveError.cacheMiss` explicitly.
+  /// fault, because it must surface `TraciveError.cacheMiss` explicitly.
   public func readIgnoringFailures(_ key: CheckCacheKey) -> CheckResult? {
     (try? read(key)) ?? nil
   }

@@ -13,7 +13,7 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 ///
 /// Deliberately not a general-purpose SQLite library: it exposes exactly what
 /// `SQLiteCheckCache` needs. Anything more would be a database layer we have to maintain, and the
-/// alternative — taking a dependency — is the one thing this package will not do (§11.6).
+/// alternative — taking a dependency — is the one thing this package will not do.
 ///
 /// Not thread-safe by itself. `SQLiteCheckCache` owns the only instance and serialises every call
 /// behind its own lock.

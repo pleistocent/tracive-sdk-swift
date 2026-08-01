@@ -1,6 +1,6 @@
 import Foundation
 
-/// A validated, folded lookup key for one identifier (§3).
+/// A validated, folded lookup key for one identifier.
 ///
 /// Build one with a factory — `TraciveQuery.phone(e164:)`, `.email(value:)`,
 /// `.bankAccount(countryAlpha3:bankCode:account:)`, `.iban(iban:)`, `.crypto(chain:address:)`,
@@ -13,7 +13,7 @@ import Foundation
 ///    local cache key, so an unfolded key would both miss on the server and split one entity into
 ///    several cache entries.
 /// 2. **Validation.** Anything that cannot produce a key capable of hitting throws
-///    `TraciveQueryError`. This matters commercially, not just hygienically: per §3.2 a miss is
+///    `TraciveQueryError`. This matters commercially, not just hygienically: a miss is
 ///    billed, so sending a key that can never hit spends a credit for nothing.
 ///
 /// ## There is no `domain()` builder
@@ -39,7 +39,7 @@ public struct TraciveQuery: Equatable, Hashable, Sendable, CustomStringConvertib
   /// The folded lookup key, e.g. `PHONE_+6281234567891`.
   ///
   /// This contains the raw identifier. Never log it; hash it (SHA-256) before it is used as a cache
-  /// key, per §5 and §11.3.
+  /// key, and no raw identifier is ever written to disk.
   public let searchQueryIndex: String
 
   private init(kind: Kind, searchQueryIndex: String) throws {

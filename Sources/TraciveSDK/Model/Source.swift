@@ -1,6 +1,6 @@
 import Foundation
 
-/// Cache-versus-network strategy for a single check (§4, §5).
+/// Cache-versus-network strategy for a single check.
 ///
 /// This is a client-side switch only — it is never sent on the wire.
 ///

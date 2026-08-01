@@ -1,6 +1,6 @@
 import Foundation
 
-/// Path fragments for the Open API (§3.1), hung off `TraciveEnvironment.baseUrl` (which already
+/// Path fragments for the Open API, hung off `TraciveEnvironment.baseUrl` (which already
 /// ends in `/v1`).
 ///
 /// **None of these answer yet.** No `/v1/*` route is live as of
@@ -20,7 +20,7 @@ enum TraciveAPI {
   }
 }
 
-/// Request body for `POST /v1/scammer-checks` (§4).
+/// Request body for `POST /v1/scammer-checks`.
 ///
 /// Exactly four fields, and each one is deliberate:
 ///
@@ -58,14 +58,14 @@ struct ScammerCheckRequestBody: Encodable, Equatable {
   }
 }
 
-/// Turns an `HTTPResponse` into either a decoded model or a typed `TraciveError` (§7).
+/// Turns an `HTTPResponse` into either a decoded model or a typed `TraciveError`.
 ///
 /// This is the only place in the SDK that reads an HTTP status. Everything upstream of it deals in
 /// `TraciveError`, which is why an unrecognised server code can never crash a caller: it lands in
 /// `.server`/`.unknown` carrying its raw spelling.
 enum TraciveResponseMapper {
 
-  /// Decodes a 2xx body, or maps any other status onto the §7 error table.
+  /// Decodes a 2xx body, or maps any other status onto the error table.
   ///
   /// - Parameter now: used only to resolve an HTTP-date `Retry-After` into a delay.
   static func decode<T: Decodable>(
@@ -96,7 +96,7 @@ enum TraciveResponseMapper {
     }
   }
 
-  /// Maps a non-2xx response onto the §7 table.
+  /// Maps a non-2xx response onto the error table.
   static func error(from response: HTTPResponse, now: Date) -> TraciveError {
     let info = errorInfo(from: response.body)
     let retryAfter = TraciveError.retryAfterSeconds(from: response.header("Retry-After"), now: now)
@@ -112,8 +112,8 @@ enum TraciveResponseMapper {
   /// Parses an error body in either shape the backend can produce.
   ///
   /// The `/v1/*` routes answer with Tracive's envelope, `{"error":{"code","message","checkId"}}`
-  /// (§7). The OAuth routes answer with RFC 6749's flat shape,
-  /// `{"error":"invalid_grant","error_description":"…"}` — §3.5 lists `invalid_grant`,
+  ///. The OAuth routes answer with RFC 6749's flat shape,
+  /// `{"error":"invalid_grant","error_description":"…"}` — the contract lists `invalid_grant`,
   /// `unsupported_grant_type` and `invalid_client` explicitly as "RFC 6749" errors. Both are read
   /// here so a caller never has to care which endpoint it was talking to, and an unparseable body
   /// degrades to "no code" rather than to a thrown decoding error.
@@ -156,7 +156,7 @@ extension TraciveError {
   /// A failure that originated inside the SDK rather than at the server.
   ///
   /// It rides in `.unknown` with `status == nil` and a namespaced `code`, which is exactly the
-  /// escape hatch §7 asks for ("an unrecognised code must map to a generic `Server`/`Unknown`
+  /// escape hatch the contract asks for ("an unrecognised code must map to a generic `Server`/`Unknown`
   /// carrying the raw code"). Callers can therefore switch on `serverCode` uniformly without
   /// caring whether a code came off the wire or from here.
   static func sdk(_ code: String, _ message: String) -> TraciveError {

@@ -2,7 +2,7 @@ import Foundation
 
 // Lenient readers used by the model layer.
 //
-// Rule from the spec (§4): "Unknown JSON fields must be ignored, not fatal (forward compatibility
+// Rule from the spec: "Unknown JSON fields must be ignored, not fatal (forward compatibility
 // with phase 2)." `Codable` already ignores unknown *keys*; these helpers extend the same tolerance
 // to a known key whose value arrives in an unexpected-but-recoverable shape (an integer sent as a
 // JSON string, a count sent as a double, an instant we cannot parse). Anything genuinely

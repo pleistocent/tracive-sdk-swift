@@ -1,6 +1,6 @@
 import Foundation
 
-/// Which Tracive Open API deployment to talk to (§2).
+/// Which Tracive Open API deployment to talk to.
 ///
 /// **The Open API is not live yet.** These hosts are the documented contract; nothing answers on
 /// them today, which is exactly why every unit test in this SDK runs against an injected fake
@@ -11,7 +11,7 @@ public enum TraciveEnvironment: Equatable, Hashable, Sendable {
   /// Partner proxy (phase 2) or a local test server.
   case custom(baseUrl: URL)
 
-  /// The `/v1` root that every path in §4 hangs off.
+  /// The `/v1` root that every API path hangs off.
   public var baseUrl: URL {
     switch self {
     case .production:

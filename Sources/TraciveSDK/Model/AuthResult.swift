@@ -1,6 +1,6 @@
 import Foundation
 
-/// Outcome of the OAuth + PKCE consent flow (§6).
+/// Outcome of the OAuth + PKCE consent flow.
 ///
 /// `description` redacts the authorization code and the PKCE verifier: both are single-use
 /// credentials, and a leaked pair lets an attacker complete the exchange.
@@ -11,7 +11,7 @@ public enum AuthResult: @unchecked Sendable, CustomStringConvertible, CustomDebu
   /// check it before relying on a scope.
   case authorized(grantedScopes: [String])
 
-  /// `.confidential` client: the SDK stopped at the authorization code, as the §4.2 sequence
+  /// `.confidential` client: the SDK stopped at the authorization code, as the documented sequence
   /// requires. Forward all three values to the partner's own backend, which completes the exchange
   /// with its `client_secret`. Nothing was stored locally.
   case codeReceived(code: String, codeVerifier: String, redirectUri: String)

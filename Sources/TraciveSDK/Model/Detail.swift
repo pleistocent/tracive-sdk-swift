@@ -1,6 +1,6 @@
 import Foundation
 
-/// How much of the report body to ask for (§4).
+/// How much of the report body to ask for.
 ///
 /// The raw values are lowercase because that is exactly what the request body carries:
 /// `{ "creditSource": "USER", "detail": "minimal", … }`.

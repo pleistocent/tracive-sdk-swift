@@ -1,10 +1,10 @@
 import Foundation
 
-/// The SDK's source of "now" and of "wait" — the `clock` test seam from §2.
+/// The SDK's source of "now" and of "wait" — the `clock` test seam.
 ///
 /// Two things in this SDK depend on the passage of time and both are otherwise untestable:
-/// cache TTL (§5, where the shortest window is an hour and the longest is thirty days) and retry
-/// backoff (§7). Injecting a clock turns a thirty-day expiry test into an assignment and a
+/// cache TTL (where the shortest window is an hour and the longest is thirty days) and retry
+/// backoff. Injecting a clock turns a thirty-day expiry test into an assignment and a
 /// four-second backoff into an assertion.
 ///
 /// The name is prefixed rather than being plain `Clock` on purpose: the standard library declares

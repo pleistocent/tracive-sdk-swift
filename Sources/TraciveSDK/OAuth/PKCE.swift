@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Security
 
-/// One PKCE pair plus the CSRF `state` for a single authorization attempt (RFC 7636, §6 step 1).
+/// One PKCE pair plus the CSRF `state` for a single authorization attempt (RFC 7636, step 1 of the consent flow).
 ///
 /// The verifier is the secret: whoever holds it, plus the authorization code, can complete the
 /// exchange. It never leaves the device for a `.public` client, and for a `.confidential` client it
@@ -24,7 +24,7 @@ public struct PKCE: Equatable, Hashable, Sendable, CustomStringConvertible,
     self.state = state
   }
 
-  /// **S256 only.** RFC 7636 permits `plain`; Tracive's authorization server rejects it (§4.2), and
+  /// **S256 only.** RFC 7636 permits `plain`; Tracive's authorization server rejects it, and
   /// so does this SDK — with `plain` the challenge *is* the verifier, so an attacker who can read
   /// the authorize URL can complete the exchange.
   public static let codeChallengeMethod = "S256"

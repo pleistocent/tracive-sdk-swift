@@ -3,7 +3,7 @@ import Foundation
 /// The one seam through which every byte of network traffic leaves this SDK.
 ///
 /// **Why this exists.** The Tracive Open API does not exist yet — there is no `api.tracive.id` to
-/// call. Every behaviour in this SDK (§4 request shape, §5 cache routing, §6 refresh, §7 error
+/// call. Every behaviour in this SDK (request shape, cache routing, token refresh, error
 /// mapping) is therefore specified against an injected transport and verified against a fake, and
 /// no unit test in this package opens a socket. When the backend does ship, nothing about the
 /// tested logic changes: only `URLSessionHTTPTransport` starts getting real answers.
@@ -19,7 +19,7 @@ public protocol HTTPTransport: Sendable {
 }
 
 /// The HTTP verbs this SDK uses. `POST /v1/scammer-checks`, `GET /v1/credits`, `GET /v1/profile`,
-/// `POST /v1/oauth/token`, `POST /v1/oauth/revoke` — that is the whole surface (§3.1).
+/// `POST /v1/oauth/token`, `POST /v1/oauth/revoke` — that is the whole surface.
 public enum HTTPMethod: String, Hashable, Sendable {
   case get = "GET"
   case post = "POST"
@@ -64,7 +64,7 @@ public struct HTTPRequest: Equatable, Hashable, Sendable, CustomStringConvertibl
   ///
   /// The `Authorization` header carries a bearer token and the body carries `searchQueryIndex`,
   /// which embeds the raw phone number / account number being checked. Neither may reach a log,
-  /// a `print`, or a crash report (§11.3).
+  /// a `print`, or a crash report.
   public var description: String {
     "HTTPRequest(\(method.rawValue) \(url.absoluteString), "
       + "headers: [\(headers.keys.sorted().joined(separator: ", "))] = <redacted>, "
@@ -89,7 +89,7 @@ public struct HTTPResponse: Equatable, Hashable, Sendable, CustomStringConvertib
     self.body = body
   }
 
-  /// Case-insensitive header read — this is how `Retry-After` is found (§7).
+  /// Case-insensitive header read — this is how `Retry-After` is found.
   public func header(_ name: String) -> String? {
     HTTPHeaderLookup.value(for: name, in: headers)
   }

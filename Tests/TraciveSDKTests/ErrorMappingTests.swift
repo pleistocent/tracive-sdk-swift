@@ -2,7 +2,7 @@ import XCTest
 
 @testable import TraciveSDK
 
-/// The §7 error contract, exercised through the pipeline a real response actually travels:
+/// The error contract, exercised through the pipeline a real response actually travels:
 /// `HTTPResponse` → envelope parse → `Retry-After` parse → typed `TraciveError`.
 ///
 /// The point is not that `TraciveError.from` has the right `switch` — it is that a *response* off
@@ -19,7 +19,7 @@ final class ErrorMappingTests: XCTestCase {
   // MARK: - The whole table
 
   func testEveryDocumentedErrorCodeMapsToItsType() {
-    // One row per line of the §7 table. A code added to the backend without being added here is a
+    // One row per line of the error table. A code added to the backend without being added here is a
     // code that will reach partners as `.unknown`.
     let table: [(status: Int, code: String, expected: TraciveErrorKind)] = [
       (400, "invalid_request", .invalidRequest),
@@ -74,12 +74,12 @@ final class ErrorMappingTests: XCTestCase {
 
   func testUnknownCodeOnAClientErrorBecomesUnknownAndKeepsTheRawCode() {
     let error = TraciveResponseMapper.error(
-      from: .error(status: 400, code: "tahap_2_only", message: "not yet"),
+      from: .error(status: 400, code: "future_phase_only", message: "not yet"),
       now: now
     )
 
     XCTAssertEqual(error.kind, .unknown)
-    XCTAssertEqual(error.serverCode, "tahap_2_only")
+    XCTAssertEqual(error.serverCode, "future_phase_only")
     XCTAssertEqual(error.info?.message, "not yet")
     XCTAssertFalse(error.isTransient)
   }
@@ -134,7 +134,7 @@ final class ErrorMappingTests: XCTestCase {
 
   func testRFC6749FlatEnvelopeIsParsed() {
     // The OAuth routes answer with `{"error":"…","error_description":"…"}`, not with Tracive's
-    // nested envelope (§3.5). Both shapes have to be readable or a token failure arrives blank.
+    // nested envelope. Both shapes have to be readable or a token failure arrives blank.
     let response = HTTPResponse.oauthError(
       status: 400, error: "unsupported_grant_type", description: "only S256")
 
@@ -359,7 +359,7 @@ final class ErrorMappingTests: XCTestCase {
   // MARK: - Query rejection happens before the wire
 
   func testAnInvalidQueryNeverReachesTheNetwork() async throws {
-    // §3.2: a miss is billed, so a key that cannot hit must be rejected locally. The builder throws
+    // A miss is billed, so a key that cannot hit must be rejected locally. The builder throws
     // before a client is even involved — this asserts the ordering that saves the credit.
     XCTAssertThrowsError(try TraciveQuery.phone(e164: "081234567891")) { error in
       XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "not_e164")

@@ -5,7 +5,7 @@ import XCTest
 
 @testable import TraciveSDK
 
-/// Exercises the local encrypted result cache (§5).
+/// Exercises the local encrypted result cache.
 ///
 /// Nothing here touches the network — the Tracive Open API does not exist yet — and nothing here
 /// touches the real Keychain. Every store is built with `EphemeralCacheKeyStore`, because a
@@ -82,7 +82,7 @@ final class CacheTests: XCTestCase {
     try TraciveQuery.phone(e164: e164)
   }
 
-  // MARK: - Key derivation (§5: SHA-256 of the folded query)
+  // MARK: - Key derivation (SHA-256 of the folded query)
 
   func testCacheKeyIsSha256OfTheFoldedQuery() throws {
     let query = try makeQuery()
@@ -152,13 +152,13 @@ final class CacheTests: XCTestCase {
 
   func testMissIsNilRatherThanAnError() throws {
     let cache = try SQLiteCheckCache.inMemory(now: TestClock(CacheTests.t0).provider)
-    // §5 requires `Source.cache` to surface `TraciveError.cacheMiss` — but that is the *client's*
+    // `Source.cache` must surface `TraciveError.cacheMiss` — but that is the *client's*
     // decision, since only it knows the requested source. The store reports a plain absence.
     XCTAssertNil(try cache.read(try makeQuery()))
     XCTAssertEqual(try cache.count(), 0)
   }
 
-  // MARK: - TTL per tier (§5)
+  // MARK: - TTL per tier
 
   func testDefaultTtlPerTier() throws {
     let day: TimeInterval = 24 * 60 * 60
@@ -221,7 +221,7 @@ final class CacheTests: XCTestCase {
     )
   }
 
-  // MARK: - Server-driven TTL override (§5's fleet-wide invalidation lever)
+  // MARK: - Server-driven TTL override (the fleet-wide invalidation lever)
 
   func testServerTtlOverridesTheTierDefault() throws {
     let clock = TestClock(CacheTests.t0)
@@ -299,7 +299,7 @@ final class CacheTests: XCTestCase {
     XCTAssertNil(try strict.read(query), "the tightened one-hour policy must apply to the old row")
   }
 
-  // MARK: - Full detail is never cached (§5)
+  // MARK: - Full detail is never cached
 
   func testFullDetailFieldsAreNeverStored() throws {
     let clock = TestClock(CacheTests.t0)
@@ -359,7 +359,7 @@ final class CacheTests: XCTestCase {
     _ = clock
   }
 
-  // MARK: - Privacy: nothing identifying reaches the disk (§11.3)
+  // MARK: - Privacy: nothing identifying reaches the disk
 
   func testTheDatabaseFileContainsNeitherTheIdentifierNorTheVerdict() throws {
     let clock = TestClock(CacheTests.t0)
@@ -463,7 +463,7 @@ final class CacheTests: XCTestCase {
     )
   }
 
-  // MARK: - Schema version invalidation (§5)
+  // MARK: - Schema version invalidation
 
   func testBumpingTheSchemaVersionInvalidatesEverything() throws {
     let clock = TestClock(CacheTests.t0)

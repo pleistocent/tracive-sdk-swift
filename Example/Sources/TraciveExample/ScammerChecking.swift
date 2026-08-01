@@ -30,7 +30,7 @@ public protocol ScammerChecking: Sendable {
 
 // MARK: - Cache-first
 
-/// Demonstrates the cache-first pattern against the SDK's real encrypted cache (§5).
+/// Demonstrates the cache-first pattern against the SDK's real encrypted cache.
 ///
 /// A hit costs zero credits and does no network I/O, and comes back stamped `origin == .cache`. This
 /// is what `Source.cacheFirst` does inside `TraciveClient`; it is spelled out here so the example can

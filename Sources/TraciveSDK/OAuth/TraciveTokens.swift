@@ -1,11 +1,11 @@
 import Foundation
 
-/// The token pair issued by `POST /v1/oauth/token` (§4.2, §6).
+/// The token pair issued by `POST /v1/oauth/token`.
 ///
 /// - `accessToken` is a JWT with a one-hour life. It goes in `Authorization: Bearer …`.
 /// - `refreshToken` is an opaque, **rotating** string. Every refresh returns a new one and the old
 ///   one dies. Presenting a dead refresh token trips the server's reuse detection, which revokes
-///   the entire grant — which is why refreshing is single-flighted (§6) and why replacing the
+///   the entire grant — which is why refreshing is single-flighted and why replacing the
 ///   stored token must be atomic.
 ///
 /// `description` and `debugDescription` are redacted. This type is a credential; the only place it
@@ -38,7 +38,7 @@ public struct TraciveTokens: Codable, Equatable, Hashable, Sendable, CustomStrin
 
   /// Whether the access token is known to have expired at `date`.
   ///
-  /// Informational only: the SDK does **not** refresh pre-emptively on it. §6 specifies refresh on
+  /// Informational only: the SDK does **not** refresh pre-emptively on it. Refresh happens on
   /// a 401 `expired_token`, and the server's clock is the one that decides — refreshing on a local
   /// estimate would burn a refresh-token rotation every time a device's clock drifted forward.
   /// `nil` `expiresAt` reads as "not known to be expired".
@@ -71,7 +71,7 @@ public struct TraciveTokens: Codable, Equatable, Hashable, Sendable, CustomStrin
 
 /// Where tokens live between launches.
 ///
-/// §6 is categorical: **never** `UserDefaults`, never a plain file. On iOS that means the Keychain,
+/// The rule is categorical: **never** `UserDefaults`, never a plain file. On iOS that means the Keychain,
 /// which is what `KeychainTokenStore` provides. The protocol is synchronous on purpose — the
 /// single-flight refresh in `TraciveOAuth` reads the store inside its check-and-set, and an `await`
 /// there would open a window for a second refresh to start and trip reuse detection.
