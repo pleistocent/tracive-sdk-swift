@@ -128,6 +128,14 @@ public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
     guard try statement.step() else { return nil }
     let payload = statement.blob(0)
 
+    // Release the SELECT's read cursor before anything below can DELETE from the same table on the
+    // same connection. `statement` is still in scope, and a statement that returned `SQLITE_ROW`
+    // without being stepped to completion holds its cursor open. Both removal paths below are
+    // `try?`, so a `SQLITE_LOCKED` there would be swallowed and the row would quietly survive —
+    // `read` would keep answering `nil` correctly while the file grew. `payload` is a `Data` copy,
+    // so it stays valid after the reset.
+    statement.reset()
+
     let result: CheckResult
     do {
       result = try cipher.open(payload, for: key)

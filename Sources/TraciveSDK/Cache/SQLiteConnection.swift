@@ -137,6 +137,20 @@ final class SQLiteStatement {
 
   // MARK: - Stepping
 
+  /// Releases the statement's cursor without finalising it.
+  ///
+  /// Needed because a `SELECT` that has returned `SQLITE_ROW` and has not been stepped to
+  /// completion still holds a read cursor on the table. Issuing a `DELETE` on that same table over
+  /// the same connection while the cursor is open is permitted by SQLite but can return
+  /// `SQLITE_LOCKED` under some configurations — and at the one call site that does it, the
+  /// `DELETE` is a `try?`, so the failure would be swallowed and the row would silently survive.
+  ///
+  /// The return code is deliberately ignored: `sqlite3_reset` re-reports the error from the most
+  /// recent `step`, which the caller has already seen and handled. It is not a new failure.
+  func reset() {
+    sqlite3_reset(handle)
+  }
+
   /// Advances the statement.
   ///
   /// - Returns: `true` when a row is available, `false` when the statement is done.
