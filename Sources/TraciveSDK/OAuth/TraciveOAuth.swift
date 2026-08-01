@@ -42,6 +42,9 @@ public actor TraciveOAuth {
   /// consent harness.
   public nonisolated let authorizationEndpoint: URL
   /// The clean install link opened when Tracive is missing. Carries no OAuth parameters.
+  ///
+  /// Whatever was passed to `init(…, installURL:)`, verbatim, or the per-client default when that
+  /// was `nil`. A blank override is *not* rewritten — see the initialiser.
   public nonisolated let installURL: URL
 
   private let transport: any HTTPTransport
@@ -82,6 +85,26 @@ public actor TraciveOAuth {
   ///   - appLauncher: defaults to `UIApplication` on iOS and to a launcher that reports "nothing is
   ///     installed" elsewhere, so `authorize()` degrades to `.appNotInstalled` on macOS rather than
   ///     pretending.
+  ///   - installURL: where a user without the Tracive app is sent. `nil` — and only `nil` — means
+  ///     "no override", and selects the default clean install link for this client.
+  ///
+  ///     **A blank override is used as given, not replaced by the default.** Pass a whitespace-only
+  ///     or otherwise unopenable URL and that is exactly what the install funnel will try to open,
+  ///     and fail to. This is deliberate, and it is the one place this SDK does not follow the
+  ///     "treat blank as absent" convention.
+  ///
+  ///     The reasoning is about which failure a partner can act on. A blank override is a
+  ///     configuration bug — an unread environment variable, an empty build setting. Substituting
+  ///     the default makes that bug *work*: a plausible page opens, the mistake passes review and
+  ///     ships, and it stays invisible until the day the partner needs their own funnel (a regional
+  ///     store, an enterprise distribution) and cannot work out why Tracive's link keeps appearing
+  ///     instead. Keeping the value fails at once, while the partner is looking at their own
+  ///     configuration, and what fails is visibly their value rather than ours.
+  ///
+  ///     Note the trap the `URL?` type sets: `URL(string:)` answers `nil` for an empty string, so
+  ///     funnelling an unvalidated configuration value straight through it hands this initialiser a
+  ///     `nil` that is indistinguishable from passing nothing — and that does get the default.
+  ///     Check the string before converting it if the distinction matters to you.
   public init(
     configuration: OAuthConfiguration,
     environment: TraciveEnvironment = .production,
@@ -102,6 +125,9 @@ public actor TraciveOAuth {
     self.clock = clock ?? TraciveSystemClock()
     self.authorizationEndpoint =
       authorizationEndpoint ?? AuthorizeURLBuilder.defaultEndpoint(for: environment)
+    // `??` and nothing else, on purpose: no trim, no emptiness test. A partner's explicit value is
+    // kept however unusable it looks, so a misconfiguration fails as their own visible failure
+    // rather than being quietly papered over with Tracive's link. See the parameter documentation.
     self.installURL = installURL ?? TraciveAppPresence.installURL(clientId: configuration.clientId)
   }
 

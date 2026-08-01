@@ -167,6 +167,24 @@ source compatibility until the API freezes at 1.0.
   documents for scope strings the SDK never requests, and it does not know prose from example.)
 - `signOut()` is documented as **not** clearing the check cache, with the shared-device consequence
   spelled out, and `TraciveClient.init` is documented as doing blocking disk and Keychain I/O.
+- **A blank `installURL` override is now specified, and tested, as never being replaced by the
+  default.** No behaviour changes: `TraciveOAuth` already kept whatever non-`nil` URL it was given,
+  and only `nil` ever selected the default. What was missing was that this is a *decision* — the
+  sibling SDKs split on it, one trimming a blank override and falling back — and nothing recorded
+  or defended it here, so a well-meant "treat blank as absent" tidy-up could have landed as an
+  obvious improvement.
+
+  The position: substituting the default for a partner's explicit blank value makes a
+  misconfiguration *work*. A plausible page opens, the unread environment variable or empty build
+  setting survives review and ships, and it stays invisible until the partner needs their own
+  install funnel and cannot explain why Tracive's link keeps appearing. Keeping the value fails
+  immediately, visibly, and as the partner's own failure. The initialiser documents this, and three
+  tests pin it — verified capable of failing by introducing the fallback and watching them go red.
+
+  One trap comes with the `URL?` type and is documented rather than fixed: `URL(string:)` answers
+  `nil` for an empty string, so a partner funnelling an unvalidated configuration value through it
+  hands the SDK a `nil` indistinguishable from passing nothing, and does get the default. Only the
+  call site can tell those apart.
 
 ### Internal
 

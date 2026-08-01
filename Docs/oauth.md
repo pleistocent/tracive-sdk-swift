@@ -79,6 +79,22 @@ App Store and then to a fresh install, through channels nobody controls.
 Give that a real UI path — a dead end here is the single most common way an integration silently
 converts at zero.
 
+### Overriding the install link
+
+`TraciveOAuth.init(…, installURL:)` takes your own link. `nil` — and only `nil` — means "no
+override" and selects the default above.
+
+**A blank override is used as given, not replaced by the default.** Hand it a whitespace-only or
+otherwise unopenable URL and that is precisely what the funnel tries to open, and fails to. That is
+deliberate: silently substituting our link for your explicit value makes a configuration bug *work*,
+so an unread environment variable or an empty build setting passes review, ships, and only surfaces
+the day you need your own funnel and cannot explain why Tracive's link keeps appearing. Failing at
+once, on your value, is the cheaper failure.
+
+One caveat that belongs to the type rather than the SDK: `URL(string:)` returns `nil` for an empty
+string. Converting an unvalidated configuration value with it hands the SDK a `nil` it cannot tell
+from "no override" — so check the string first if that distinction matters to you.
+
 ## Never a `WKWebView`
 
 The authorize URL opens with `UIApplication.open`, as a Universal Link. Not `WKWebView`, not
