@@ -69,16 +69,111 @@ public struct TraciveTokens: Codable, Equatable, Hashable, Sendable, CustomStrin
   public var debugDescription: String { description }
 }
 
+/// An authorization that has been started and is waiting for its redirect.
+///
+/// Persisted, not merely held in a field. Consent happens in **another app**: the host app is
+/// backgrounded for its whole duration, and iOS is entitled to terminate a backgrounded app under
+/// memory pressure. A `code_verifier` that lived only in memory is gone when the Universal Link
+/// brings the app back — the callback arrives, `state` matches nothing, the exchange cannot be
+/// completed, and a user who consented successfully lands in a dead flow that reports itself as a
+/// state mismatch.
+///
+/// `description` redacts the verifier and the `state`. The verifier is the secret half of the
+/// exchange, which is also why this record belongs in the same secure store as the tokens and
+/// **never** in `UserDefaults` or a plain file.
+public struct PendingAuthorization: Codable, Equatable, Hashable, Sendable,
+  CustomStringConvertible, CustomDebugStringConvertible
+{
+  /// The CSRF nonce put on the authorize URL and compared on the way back.
+  public let state: String
+  /// The PKCE verifier whose challenge was sent. The secret.
+  public let codeVerifier: String
+  /// The redirect URI that was sent, which RFC 6749 §4.1.3 requires the exchange to repeat
+  /// identically. Recorded rather than re-read from the configuration so a relaunched process
+  /// replays the URI the authorization was actually started with.
+  public let redirectUri: String
+  /// When the attempt was started, by the SDK's clock. Used only to expire it.
+  public let createdAt: Date
+
+  /// How long a started-but-unfinished authorization stays resumable: **ten minutes**.
+  ///
+  /// Ten matches the lifetime of the authorization code itself (RFC 6749 §4.1.2 puts the maximum at
+  /// ten minutes, and Tracive's server is at that maximum). Holding the verifier for longer buys no
+  /// additional recovery, because by then the code the verifier would be exchanged with is already
+  /// dead server-side: the flow cannot be completed however well the record survived. What a longer
+  /// window does buy is a live `code_verifier` sitting on the device with nothing left to spend it
+  /// on, and a wider replay window for an abandoned attempt. So the record is kept exactly as long
+  /// as it can still be useful and not one minute more.
+  public static let maxAge: TimeInterval = 600
+
+  public init(state: String, codeVerifier: String, redirectUri: String, createdAt: Date) {
+    self.state = state
+    self.codeVerifier = codeVerifier
+    self.redirectUri = redirectUri
+    self.createdAt = createdAt
+  }
+
+  /// Whether this attempt is older than `maxAge` at `date`.
+  ///
+  /// Deliberately takes **no** window parameter. `maxAge` is the only place the number lives, and a
+  /// per-call override — even one defaulting to `maxAge` — would be a second way for a window to
+  /// enter the flow, which is precisely how a sibling SDK ended up with two independent copies of
+  /// its own value that were free to disagree. Nothing in this SDK wants a different window; if
+  /// something ever does, it should change the constant and say why.
+  ///
+  /// A `createdAt` in the future — only reachable if the device's wall clock moved backwards
+  /// between the two halves of one consent flow — reads as "not stale", exactly as it does in the
+  /// sibling SDKs. That is deliberate rather than overlooked: the code is dead server-side within
+  /// ten minutes regardless, so the worst such a record can do is fail an exchange it was always
+  /// going to fail.
+  public func isStale(at date: Date) -> Bool {
+    date.timeIntervalSince(createdAt) > Self.maxAge
+  }
+
+  public var description: String {
+    "PendingAuthorization(state: <redacted>, codeVerifier: <redacted>, "
+      + "redirectUri: \(redirectUri), createdAt: \(TraciveISO8601.string(from: createdAt)))"
+  }
+
+  public var debugDescription: String { description }
+}
+
 /// Where tokens live between launches.
 ///
 /// The rule is categorical: **never** `UserDefaults`, never a plain file. On iOS that means the Keychain,
 /// which is what `KeychainTokenStore` provides. The protocol is synchronous on purpose — the
 /// single-flight refresh in `TraciveOAuth` reads the store inside its check-and-set, and an `await`
 /// there would open a window for a second refresh to start and trip reuse detection.
+///
+/// The store also holds the **pending authorization**, for the reason `PendingAuthorization` gives:
+/// it carries the `code_verifier`, so it is a credential and belongs nowhere else.
 public protocol TraciveTokenStore: Sendable {
   func load() throws -> TraciveTokens?
   func save(_ tokens: TraciveTokens) throws
+  /// Erases everything this store holds for the client — tokens **and** any pending authorization.
   func clear() throws
+
+  /// The authorization waiting for its redirect, or `nil`.
+  func loadPending() throws -> PendingAuthorization?
+  /// Stores — or, with `nil`, erases — the pending authorization.
+  func savePending(_ pending: PendingAuthorization?) throws
+}
+
+extension TraciveTokenStore {
+
+  /// Default: no persistence.
+  ///
+  /// These two have defaults so that a host app which already conforms its own vault to this
+  /// protocol keeps compiling, and keeps behaving exactly as it does today: `TraciveOAuth` holds
+  /// the pending attempt in memory as well, and only consults the store when its own field is
+  /// empty. A store that does not override these therefore loses nothing that used to work — it
+  /// just cannot recover an authorization from a process that was terminated mid-consent.
+  ///
+  /// Override both if you want that recovery, and put the record wherever you put the tokens.
+  public func loadPending() throws -> PendingAuthorization? { nil }
+
+  /// Default: no persistence. See `loadPending()`.
+  public func savePending(_ pending: PendingAuthorization?) throws {}
 }
 
 /// A `TraciveTokenStore` that keeps tokens in memory only.
@@ -90,6 +185,7 @@ public final class InMemoryTokenStore: TraciveTokenStore, @unchecked Sendable {
 
   private let lock = NSLock()
   private var tokens: TraciveTokens?
+  private var pending: PendingAuthorization?
 
   public init(tokens: TraciveTokens? = nil) {
     self.tokens = tokens
@@ -111,6 +207,19 @@ public final class InMemoryTokenStore: TraciveTokenStore, @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     tokens = nil
+    pending = nil
+  }
+
+  public func loadPending() throws -> PendingAuthorization? {
+    lock.lock()
+    defer { lock.unlock() }
+    return pending
+  }
+
+  public func savePending(_ pending: PendingAuthorization?) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    self.pending = pending
   }
 }
 

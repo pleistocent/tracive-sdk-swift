@@ -77,13 +77,16 @@ backend expects, and your server is what holds a Tracive credential.
 
 `authorize()` is one `await` at the call site, but it crosses a process boundary in the middle: the
 authorize URL is opened as a Universal Link that the Tracive app claims, and the flow resumes when
-your `AppDelegate`/`SceneDelegate` forwards the redirect to `handleCallback(url:)`.
+your `AppDelegate`/`SceneDelegate` forwards the redirect to `handleCallback(url:)`. Your app is
+backgrounded for the whole of the user's visit to Tracive and may not survive it, which is why the
+attempt is written to the token store before the launch rather than kept in a field.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant App as Your app
     participant SDK as TraciveOAuth
+    participant Store as tokenStore (Keychain)
     participant OS as UIApplication
     participant Tracive as Tracive app
     participant API as Tracive API
@@ -99,32 +102,46 @@ sequenceDiagram
         OS-->>SDK: true
         SDK->>SDK: pkceGenerator.generate()
         Note over SDK: codeVerifier, state, and<br/>codeChallenge = BASE64URL(SHA256(verifier))
+        SDK->>Store: savePending(state, codeVerifier,<br/>redirectUri, createdAt)
+        Note over SDK,Store: Written BEFORE the launch. The verifier is a secret,<br/>so it goes to the Keychain, never to UserDefaults.
         SDK->>OS: open(authorize URL)
         Note over OS,Tracive: Universal Link, handled by the OS.<br/>No WKWebView and no ASWebAuthenticationSession.
         OS->>Tracive: response_type=code, client_id, redirect_uri,<br/>state, code_challenge, code_challenge_method=S256,<br/>scope, partner_user_id
         Tracive->>Tracive: user reviews the requested scopes
+        Note over App: Your app is backgrounded, and may be<br/>terminated under memory pressure. If it is,<br/>the awaiting authorize() is gone for good.
         Tracive->>API: consent
         Tracive-->>App: redirect to your redirect_uri with code and state
         App->>SDK: handleCallback(url:)
-        SDK->>SDK: constant-time compare of state
+        SDK->>Store: loadPending()
+        Note over SDK,Store: Read back even after a relaunch, which is what<br/>lets a new process finish the old process's consent.
+        Store-->>SDK: the pending attempt, or nothing
 
-        alt state does not match, or nothing is pending
+        alt nothing pending
+            SDK-->>App: AuthResult.failed(.stateMismatch)
+        else attempt older than PendingAuthorization.maxAge (10 min)
+            SDK->>Store: savePending(nil)
+            SDK-->>App: AuthResult.failed(authorization_expired)
+        else state does not match
+            Note over SDK,Store: The record is kept: any app can send a URL, and<br/>clearing here would let a stray redirect cancel<br/>the consent in progress. The expiry collects it.
             SDK-->>App: AuthResult.failed(.stateMismatch)
         else callback carries error=access_denied
+            SDK->>Store: savePending(nil)
             SDK-->>App: AuthResult.denied
         else clientType is .confidential
+            SDK->>Store: savePending(nil)
             SDK-->>App: AuthResult.codeReceived(code, codeVerifier, redirectUri)
         else clientType is .public
+            SDK->>Store: savePending(nil)
             SDK->>API: POST /v1/oauth/token
             Note over SDK,API: grant_type=authorization_code, code,<br/>redirect_uri, client_id, code_verifier.<br/>No client_secret exists to send.
             API-->>SDK: access_token, refresh_token, scope
-            SDK->>SDK: tokenStore.save(tokens)
+            SDK->>Store: save(tokens)
             SDK-->>App: AuthResult.authorized(grantedScopes)
         end
     end
 ```
 
-Five things the diagram is making visible on purpose:
+Seven things the diagram is making visible on purpose:
 
 1. **The install pre-check happens before any redirect.** If `canOpen` says no, the SDK opens the
    clean install link — which carries no OAuth parameter of any kind — and answers
@@ -144,11 +161,24 @@ Five things the diagram is making visible on purpose:
 5. **A confidential client stops at the code.** The exchange needs a `client_secret`, and a mobile
    binary has nowhere to keep one, so the SDK hands the code, the verifier and the redirect URI back
    for your own backend to exchange. Nothing is stored locally on that path.
+6. **The attempt is persisted before the launch, and read back after it.** That ordering is the
+   whole mechanism: the app can only be killed once it is in the background, which is after the
+   `open`, so a record written afterwards would not exist during the one window that matters. On
+   the way back the store is consulted whenever this process has no attempt of its own — which is
+   exactly the post-termination case — so a relaunched app completes a consent it never started.
+   Because there is no `authorize()` left to resume then, `handleCallback(url:)`'s **return value**
+   is the only place that outcome appears.
+7. **The record is erased on every outcome that spends or abandons it**, so a spent callback cannot
+   be replayed by a later process, and a `signOut()` cannot leave a live verifier behind. A `state`
+   mismatch is the deliberate exception, for the reason the diagram notes: erasing there would let
+   any app on the device cancel a consent in progress by sending one URL.
 
 Two details omitted from the diagram to keep it readable. `authorize()` installs its continuation
 *before* it asks the OS to open the URL, so a callback that arrives during the launch cannot strand
-the caller; and a `signOut()` that lands while the code exchange is in flight wins — the exchange
-sees the token generation has moved and refuses to store the grant it just obtained.
+the caller — note that the pending record is written earlier still, inside `makeAuthorizationRequest()`,
+with no suspension between the two, so neither can overtake the other; and a `signOut()` that lands
+while the code exchange is in flight wins — the exchange sees the token generation has moved and
+refuses to store the grant it just obtained.
 
 ---
 

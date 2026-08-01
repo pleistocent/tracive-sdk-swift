@@ -525,6 +525,437 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
   }
 
+  // MARK: - Surviving process death
+
+  /// The attempt must outlive the process that started it.
+  ///
+  /// Consent happens in *another* app. The host app is backgrounded for its whole duration and iOS
+  /// is entitled to terminate it there under memory pressure — which is not an exotic condition, it
+  /// is the ordinary fate of a backgrounded app on an older device. When that happens the PKCE
+  /// `code_verifier` dies with the process, the Universal Link relaunches the app, the callback
+  /// arrives, and there is nothing left to match `state` against or to exchange the code with. The
+  /// user, who consented perfectly successfully, lands in a dead flow, and the SDK reports nothing
+  /// that distinguishes it from a CSRF attempt.
+  ///
+  /// Two objects here, and the split is the whole point: the actor is rebuilt (a new process has a
+  /// new one) while the store is the same instance throughout (the Keychain is not emptied by a
+  /// termination). Anything the first actor kept only in a field is gone; anything it wrote to the
+  /// store is still there.
+  func testAPendingAuthorizationSurvivesTheHostAppBeingTerminated() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+
+    // Launch 1: the attempt is prepared and the authorize URL is opened. Then the OS collects the
+    // app while the user is still inside Tracive.
+    let launcher = FakeAppLauncher(canOpenAnything: true)
+    let state: String
+    do {
+      let beforeTermination = makeOAuth(transport: transport, tokenStore: store, launcher: launcher)
+      state = try await beforeTermination.makeAuthorizationRequest().state
+    }
+
+    // Launch 2: a brand-new actor with no memory of anything, holding the same store. The redirect
+    // arrives and the flow must complete exactly as if nothing had happened.
+    let afterRelaunch = makeOAuth(transport: transport, tokenStore: store, launcher: launcher)
+    let result = await afterRelaunch.handleCallback(
+      url: Self.callback(code: "auth-code", state: state))
+
+    guard case .authorized(let scopes) = result else {
+      return XCTFail("a consent the user completed was lost to a process restart: \(result)")
+    }
+    XCTAssertEqual(scopes, ["scammer.check", "credits.read"])
+    XCTAssertEqual(try store.load()?.accessToken, "access-2")
+
+    // And the exchange used the verifier from launch 1, which only the store could have supplied.
+    let fields = Self.formFields(transport.requests.first?.body)
+    XCTAssertEqual(fields["code"], "auth-code")
+    XCTAssertEqual(fields["redirect_uri"], "https://partner.example.com/tracive/callback")
+    XCTAssertFalse((fields["code_verifier"] ?? "").isEmpty)
+  }
+
+  /// The recovered attempt carries the real verifier, not merely *a* verifier.
+  ///
+  /// Asserted against the value launch 1 was handed, because "the exchange sent something
+  /// non-empty" would also pass if a relaunched process quietly generated fresh PKCE material —
+  /// which the server would answer with `invalid_grant`, and which would look, from the client, like
+  /// exactly the same dead flow this change exists to prevent.
+  func testTheRecoveredAttemptExchangesTheOriginalVerifier() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+
+    let request = try await makeOAuth(transport: transport, tokenStore: store)
+      .makeAuthorizationRequest()
+
+    let afterRelaunch = makeOAuth(transport: transport, tokenStore: store)
+    _ = await afterRelaunch.handleCallback(url: Self.callback(code: "c", state: request.state))
+
+    XCTAssertEqual(Self.formFields(transport.requests.first?.body)["code_verifier"],
+      request.codeVerifier)
+  }
+
+  /// The record must be in the store *before* the OS is asked to open anything.
+  ///
+  /// Ordering is the entire mechanism. A record written after the launch returns is a record that
+  /// does not exist during the only window in which the app can be killed — the user is in Tracive
+  /// by then — so persisting late would satisfy every "is it stored?" assertion and still lose the
+  /// verifier in the one case that matters. The launcher parks inside `open`, which is that window.
+  func testTheAttemptIsPersistedBeforeTheAuthorizeURLIsOpened() async throws {
+    let launchGate = TestGate()
+    let launcher = GatedAppLauncher(openGate: launchGate)
+    let store = InMemoryTokenStore()
+    let oauth = makeOAuth(tokenStore: store, launcher: launcher)
+
+    Task { _ = await oauth.authorize() }
+    let parkedInOpen = await waitUntil { launcher.openCallCount == 1 }
+    XCTAssertTrue(parkedInOpen, "the launcher was never asked to open the authorize URL")
+
+    let persisted = try XCTUnwrap(
+      try store.loadPending(),
+      "the attempt was not in the store while the authorize URL was being opened"
+    )
+    let launched = try XCTUnwrap(launcher.lastOpenedURL)
+    XCTAssertEqual(persisted.state, Self.queryItems(of: launched)["state"])
+    XCTAssertEqual(persisted.redirectUri, "https://partner.example.com/tracive/callback")
+
+    await launchGate.open()
+    await oauth.cancelPendingAuthorization()
+  }
+
+  // MARK: - Expiry
+
+  /// Ten minutes, and the number is not arbitrary.
+  ///
+  /// It is the lifetime of the authorization code itself. A verifier held past the point where the
+  /// code it pairs with is dead server-side cannot complete anything — it is a live secret with
+  /// nothing left to spend it on, and a wider window in which an abandoned attempt could be
+  /// replayed.
+  ///
+  /// Every number below is an **absolute** literal, never `maxAge ± 1`. A test written against the
+  /// constant it is meant to be testing passes at ten minutes, at thirty, and at a year: it looks
+  /// like coverage and asserts nothing about the window. A sibling SDK's expiry test did exactly
+  /// that — it advanced its clock by two hours — which is how that SDK's window was free to drift
+  /// without anything going red. Verified capable of failing: setting `maxAge` to 1800 fails this
+  /// test on the constant and on the 601-second case.
+  func testThePendingAttemptExpiresAfterTenMinutes() {
+    XCTAssertEqual(PendingAuthorization.maxAge, 600, "ten minutes — the authorization code's own life")
+
+    let started = Date(timeIntervalSince1970: 1_760_000_000)
+    let attempt = PendingAuthorization(
+      state: "s", codeVerifier: "v", redirectUri: "https://x.test/cb", createdAt: started)
+
+    XCTAssertFalse(attempt.isStale(at: started))
+    XCTAssertFalse(attempt.isStale(at: started.addingTimeInterval(599)))
+    XCTAssertFalse(attempt.isStale(at: started.addingTimeInterval(600)), "the boundary is inclusive")
+    XCTAssertTrue(attempt.isStale(at: started.addingTimeInterval(601)))
+  }
+
+  /// A callback for an attempt older than the maximum age is refused, and the record is dropped.
+  ///
+  /// The clock advances by an absolute 601 seconds rather than by `maxAge + 1`, so this pins the
+  /// window where it is actually enforced. Written the relative way it would pass at any window
+  /// size, which is the failure mode described on `testThePendingAttemptExpiresAfterTenMinutes`.
+  func testACallbackForAnExpiredAttemptIsRejectedAndTheRecordIsCleared() async throws {
+    let clock = RecordingClock()
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store, clock: clock)
+
+    let request = try await oauth.makeAuthorizationRequest()
+    clock.advance(by: 601)
+
+    let result = await oauth.handleCallback(url: Self.callback(code: "abc", state: request.state))
+
+    guard case .failed(let error) = result else {
+      return XCTFail("Expected an expired attempt to fail, got \(result).")
+    }
+    // Its own code, not `.stateMismatch`: "start again" and "somebody may be attacking you" are
+    // different messages and a partner should be able to tell them apart.
+    XCTAssertEqual(error.serverCode, "authorization_expired")
+    // The code was never exchanged — it is already dead server-side anyway.
+    XCTAssertEqual(transport.callCount, 0)
+    XCTAssertNil(try store.loadPending(), "an expired attempt must not stay in the store")
+    XCTAssertNil(try store.load())
+  }
+
+  /// The same rule after a restart: a stale record recovered from the store is not a licence to
+  /// exchange, or the expiry would only apply to processes that happened to survive.
+  func testAnExpiredAttemptRecoveredFromTheStoreIsAlsoRejected() async throws {
+    let clock = RecordingClock()
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+
+    let request = try await makeOAuth(transport: transport, tokenStore: store, clock: clock)
+      .makeAuthorizationRequest()
+    clock.advance(by: 601)
+
+    let afterRelaunch = makeOAuth(transport: transport, tokenStore: store, clock: clock)
+    let result = await afterRelaunch.handleCallback(
+      url: Self.callback(code: "abc", state: request.state))
+
+    guard case .failed(let error) = result else {
+      return XCTFail("Expected an expired attempt to fail, got \(result).")
+    }
+    XCTAssertEqual(error.serverCode, "authorization_expired")
+    XCTAssertEqual(transport.callCount, 0)
+    XCTAssertNil(try store.loadPending())
+  }
+
+  /// An attempt just inside the window still completes, so the expiry cannot be an off-by-one that
+  /// silently kills slow-but-legitimate consents.
+  ///
+  /// This is the other half of the boundary, and the pair is what makes the window a window: 599
+  /// must pass and 601 must fail, both as absolute numbers. A single one-sided test is satisfied by
+  /// "never expires" or by "always expires" respectively.
+  func testAnAttemptJustInsideTheWindowStillCompletes() async throws {
+    let clock = RecordingClock()
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store, clock: clock)
+
+    let request = try await oauth.makeAuthorizationRequest()
+    clock.advance(by: 599)
+
+    let result = await oauth.handleCallback(url: Self.callback(code: "abc", state: request.state))
+
+    XCTAssertEqual(result.testDescription, "authorized")
+  }
+
+  // MARK: - Clearing the persisted attempt
+
+  /// Every outcome that spends or abandons an attempt must leave the store empty.
+  ///
+  /// A record that outlives its own flow is a `code_verifier` sitting in the Keychain with a `state`
+  /// that a later callback — replayed, or simply late — can still satisfy. Each case is driven end
+  /// to end rather than by calling a clearing helper, because the defect this guards against is a
+  /// branch that forgets to call one.
+  func testEveryTerminalOutcomeClearsThePersistedAttempt() async throws {
+    // Success.
+    try await withAttempt { oauth, store, request in
+      let result = await oauth.handleCallback(url: Self.callback(code: "c", state: request.state))
+      XCTAssertEqual(result.testDescription, "authorized")
+      XCTAssertNil(try store.loadPending(), "an authorized attempt stayed in the store")
+    }
+
+    // The user refused consent inside Tracive.
+    try await withAttempt { oauth, store, request in
+      let url = Self.callbackURL(["error": "access_denied", "state": request.state])
+      let result = await oauth.handleCallback(url: url)
+      XCTAssertEqual(result.testDescription, "denied")
+      XCTAssertNil(try store.loadPending(), "a denied attempt stayed in the store")
+    }
+
+    // Any other server-reported error.
+    try await withAttempt { oauth, store, request in
+      let url = Self.callbackURL(["error": "invalid_scope", "state": request.state])
+      let result = await oauth.handleCallback(url: url)
+      XCTAssertEqual(result.testDescription, "failed")
+      XCTAssertNil(try store.loadPending(), "a rejected attempt stayed in the store")
+    }
+
+    // A callback carrying neither a code nor an error.
+    try await withAttempt { oauth, store, request in
+      let url = Self.callbackURL(["state": request.state])
+      let result = await oauth.handleCallback(url: url)
+      XCTAssertEqual(result.testDescription, "failed")
+      XCTAssertNil(try store.loadPending(), "a malformed callback left the attempt in the store")
+    }
+
+    // The user backed out of the partner's screen.
+    try await withAttempt { oauth, store, _ in
+      await oauth.cancelPendingAuthorization()
+      XCTAssertNil(try store.loadPending(), "a cancelled attempt stayed in the store")
+    }
+
+    // Sign-out, which must not leave a spendable verifier on the device.
+    try await withAttempt { oauth, store, _ in
+      await oauth.signOut()
+      XCTAssertNil(try store.loadPending(), "a verifier survived signOut()")
+    }
+
+    // The `grant_revoked` path.
+    try await withAttempt { oauth, store, _ in
+      await oauth.clearStoredTokens()
+      XCTAssertNil(try store.loadPending(), "a verifier survived clearStoredTokens()")
+    }
+  }
+
+  /// A failed exchange counts as terminal too: the code is spent as far as the server is concerned,
+  /// and retrying the same callback would only produce a second `invalid_grant`.
+  func testAFailedExchangeClearsThePersistedAttempt() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in
+      .oauthError(status: 400, error: "invalid_grant", description: "code expired")
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+    let request = try await oauth.makeAuthorizationRequest()
+
+    let result = await oauth.handleCallback(url: Self.callback(code: "c", state: request.state))
+
+    XCTAssertEqual(result.testDescription, "failed")
+    XCTAssertNil(try store.loadPending())
+  }
+
+  /// A refused launch clears it as well, or the abandoned attempt's `state` would still satisfy a
+  /// callback that arrived later by some other route.
+  func testARefusedLaunchClearsThePersistedAttempt() async throws {
+    let store = InMemoryTokenStore()
+    let oauth = makeOAuth(tokenStore: store, launcher: RefusingOpenAppLauncher())
+
+    _ = await oauth.authorize()
+
+    XCTAssertNil(try store.loadPending())
+  }
+
+  /// And the cross-restart consequence of all of the above: a spent callback cannot be replayed by
+  /// a *new* process either. Single-use has to be a property of the record, not of a field that a
+  /// termination would have reset anyway.
+  func testASpentCallbackCannotBeReplayedAfterARestart() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+    let request = try await oauth.makeAuthorizationRequest()
+    let url = Self.callback(code: "abc", state: request.state)
+
+    let first = await oauth.handleCallback(url: url)
+    XCTAssertEqual(first.testDescription, "authorized")
+
+    let afterRelaunch = makeOAuth(transport: transport, tokenStore: store)
+    let replay = await afterRelaunch.handleCallback(url: url)
+
+    guard case .failed(let error) = replay else {
+      return XCTFail("A replayed callback must not authorize again, got \(replay).")
+    }
+    XCTAssertEqual(error.kind, .stateMismatch)
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+  }
+
+  /// The one outcome that must **not** clear it: a `state` mismatch.
+  ///
+  /// Any app on the device can hand the host app a URL. If a mismatched redirect erased the pending
+  /// record, an attacker could cancel a consent the user is in the middle of for the cost of one
+  /// `open` — and the user would see the flow die for no visible reason. Nothing is spent by a
+  /// mismatch, so nothing needs consuming; an attempt nobody comes back to is collected by the
+  /// ten-minute expiry instead. The sibling SDKs make the same exception for the same reason.
+  func testAMismatchedRedirectCannotCancelTheAttemptInProgress() async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+    let request = try await oauth.makeAuthorizationRequest()
+
+    let hostile = await oauth.handleCallback(url: Self.callback(code: "x", state: "not-our-state"))
+    XCTAssertEqual(hostile.testDescription, "failed")
+    XCTAssertNotNil(try store.loadPending(), "a stray redirect cancelled the user's own flow")
+
+    // The genuine redirect, arriving afterwards, still completes.
+    let real = await oauth.handleCallback(url: Self.callback(code: "abc", state: request.state))
+    XCTAssertEqual(real.testDescription, "authorized")
+    XCTAssertNil(try store.loadPending())
+  }
+
+  // MARK: - The record itself
+
+  /// It is a credential, so it redacts itself for the same reason `TraciveTokens` does: the
+  /// verifier is the secret half of the exchange, and `state` is the CSRF nonce.
+  func testPendingAuthorizationDescriptionRedactsTheSecrets() {
+    let description = String(
+      describing: PendingAuthorization(
+        state: "SECRETSTATE",
+        codeVerifier: "SECRETVERIFIER",
+        redirectUri: "https://partner.example.com/cb",
+        createdAt: Date(timeIntervalSince1970: 1_760_000_000)
+      ))
+
+    XCTAssertFalse(description.contains("SECRETSTATE"))
+    XCTAssertFalse(description.contains("SECRETVERIFIER"))
+    XCTAssertTrue(description.contains("<redacted>"))
+    // The redirect URI is not a secret, and it is the field worth seeing in a log.
+    XCTAssertTrue(description.contains("https://partner.example.com/cb"))
+  }
+
+  /// It has to survive the encoding the Keychain store puts it through, or the recovery would fail
+  /// on a real device while passing against every in-memory double in this file.
+  func testPendingAuthorizationSurvivesJSONRoundTripAsTheKeychainStoresIt() throws {
+    let attempt = PendingAuthorization(
+      state: "the-state",
+      codeVerifier: "the-verifier",
+      redirectUri: "https://partner.example.com/tracive/callback",
+      createdAt: Date(timeIntervalSince1970: 1_760_000_000)
+    )
+
+    let decoded = try JSONDecoder().decode(
+      PendingAuthorization.self, from: JSONEncoder().encode(attempt))
+
+    XCTAssertEqual(decoded, attempt)
+  }
+
+  /// The pending record and the grant are separate Keychain items, separated by **service** rather
+  /// than by a suffix on the account — the account is the caller's client id, so decorating it
+  /// would let a client id ending in the suffix address another client's pending slot.
+  func testThePendingRecordIsItsOwnKeychainItem() {
+    let store = KeychainTokenStore(clientId: "test-client")
+
+    let grant = store.baseQuery()
+    let attempt = store.pendingQuery()
+
+    XCTAssertNotEqual(
+      grant[kSecAttrService as String] as? String,
+      attempt[kSecAttrService as String] as? String,
+      "the verifier would overwrite the grant"
+    )
+    // Same account, so two OAuth clients still keep separate attempts.
+    XCTAssertEqual(attempt[kSecAttrAccount as String] as? String, "test-client")
+    // …and everything else, including the macOS data-protection opt-in, is identical.
+    XCTAssertEqual(Set(grant.keys), Set(attempt.keys))
+  }
+
+  /// `clear()` means everything, tokens and attempt alike. `signOut()` relies on it.
+  func testClearingTheStoreErasesThePendingRecordToo() throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    try store.savePending(
+      PendingAuthorization(
+        state: "s", codeVerifier: "v", redirectUri: "https://x.test/cb", createdAt: Date()))
+
+    try store.clear()
+
+    XCTAssertNil(try store.load())
+    XCTAssertNil(try store.loadPending())
+  }
+
+  /// A store written before this record existed still compiles and still works.
+  ///
+  /// `loadPending()` and `savePending(_:)` have default implementations that persist nothing, so a
+  /// host app's own vault is not broken by a protocol requirement it has never heard of. What it
+  /// gives up is precisely the recovery — the in-memory attempt still drives the ordinary flow, so
+  /// nothing that used to work stops working.
+  func testAStoreWithoutPendingSupportKeepsTheOrdinaryFlowWorking() async throws {
+    let store = LegacyTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let request = try await oauth.makeAuthorizationRequest()
+    let result = await oauth.handleCallback(url: Self.callback(code: "c", state: request.state))
+
+    XCTAssertEqual(result.testDescription, "authorized")
+    XCTAssertNil(try store.loadPending(), "the default implementation must persist nothing")
+  }
+
+  /// Builds an attempt against a fresh in-memory store and hands both to `body`, so each terminal
+  /// outcome above is exercised from the same starting point.
+  private func withAttempt(
+    _ body: (TraciveOAuth, InMemoryTokenStore, AuthorizationRequest) async throws -> Void
+  ) async throws {
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { request, _ in
+      request.url.path.hasSuffix("/oauth/token")
+        ? .ok(json: Fixtures.refreshedTokenJSON) : HTTPResponse(status: 200)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+    let request = try await oauth.makeAuthorizationRequest()
+    XCTAssertNotNil(try store.loadPending(), "nothing was persisted, so this case proves nothing")
+
+    try await body(oauth, store, request)
+  }
+
   // MARK: - Public client exchange (step 6)
 
   func testPublicClientExchangesTheCodeAndStoresTheGrant() async throws {
@@ -1247,6 +1678,36 @@ final class FailingTokenStore: TraciveTokenStore {
   func load() throws -> TraciveTokens? { nil }
   func save(_ tokens: TraciveTokens) throws { throw Failure() }
   func clear() throws {}
+}
+
+/// A store written against the protocol as it stood before it could hold a pending authorization:
+/// three methods and nothing else.
+///
+/// It exists to be compiled. A host app that conformed its own vault to `TraciveTokenStore` must
+/// not be broken by a requirement added after it shipped, so `loadPending()` and `savePending(_:)`
+/// have default implementations and this type deliberately overrides neither.
+final class LegacyTokenStore: TraciveTokenStore, @unchecked Sendable {
+
+  private let lock = NSLock()
+  private var tokens: TraciveTokens?
+
+  func load() throws -> TraciveTokens? {
+    lock.lock()
+    defer { lock.unlock() }
+    return tokens
+  }
+
+  func save(_ tokens: TraciveTokens) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    self.tokens = tokens
+  }
+
+  func clear() throws {
+    lock.lock()
+    defer { lock.unlock() }
+    tokens = nil
+  }
 }
 
 extension AuthResult {

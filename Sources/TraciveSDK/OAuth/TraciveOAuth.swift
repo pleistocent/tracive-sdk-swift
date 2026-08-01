@@ -4,7 +4,8 @@ import Foundation
 ///
 /// ## The flow, end to end
 ///
-/// 1. `authorize()` generates a PKCE pair and a `state`.
+/// 1. `authorize()` generates a PKCE pair and a `state`, and **writes them to the token store**
+///    before anything is opened — see step 5 for why.
 /// 2. It **pre-checks that the Tracive app is installed**, before any redirect.
 /// 3. Not installed → it opens the clean install link and answers `.appNotInstalled`. The OAuth
 ///    flow never starts, and no consent parameter is handed to a third party.
@@ -12,13 +13,22 @@ import Foundation
 ///    straight to the Tracive app. Never a WebView: App Links do not fire from one, and RFC 8252
 ///    forbids it. Never `ASWebAuthenticationSession` either — v1 has no web consent to host.
 /// 5. The Tracive app returns to the partner app on its `redirect_uri`; the host app forwards that
-///    URL to `handleCallback(url:)` from its `AppDelegate`/`SceneDelegate`.
-/// 6. `state` is verified first. A `.public` client then exchanges the code at
-///    `POST /v1/oauth/token` and stores the tokens; a `.confidential` client stops at the code and
-///    hands it back for the partner's own backend to exchange with its `client_secret`.
+///    URL to `handleCallback(url:)` from its `AppDelegate`/`SceneDelegate`. The host app may have
+///    been **terminated** in the meantime — it was backgrounded for the whole of the user's visit
+///    to Tracive, which is where the OS looks first under memory pressure — so the attempt is read
+///    back from the store rather than from a field, and a relaunched process can finish a consent
+///    it has no memory of starting.
+/// 6. The attempt is expired if it is older than `PendingAuthorization.maxAge`, then `state` is
+///    verified. A `.public` client then exchanges the code at `POST /v1/oauth/token` and stores the
+///    tokens; a `.confidential` client stops at the code and hands it back for the partner's own
+///    backend to exchange with its `client_secret`.
 ///
 /// `authorize()` suspends until step 6 completes, so the whole flow reads as one `await` at the
-/// call site even though it crosses a process boundary.
+/// call site even though it crosses a process boundary. The one thing that `await` cannot survive
+/// is that process being killed: a continuation is a point in *this* process's stack, and a
+/// relaunched one has none. That case is not a lost authorization — `handleCallback(url:)` still
+/// completes it and still **returns** the outcome — but it is the reason to use that return value
+/// rather than relying on `authorize()` alone.
 ///
 /// ## Why this is an actor
 ///
@@ -56,9 +66,19 @@ public actor TraciveOAuth {
 
   // MARK: - Flow state
 
-  /// The PKCE material for the attempt currently waiting on a callback.
-  private var pending: PKCE?
+  /// The attempt currently waiting on a callback, as this process remembers it.
+  ///
+  /// A cache in front of `tokenStore`, not the record itself — the authoritative copy is the one in
+  /// the store, which is what survives the host app being terminated during consent. This field is
+  /// what makes the ordinary in-process case cost no Keychain read, and what keeps a custom
+  /// `TraciveTokenStore` that does not implement `savePending(_:)` working exactly as before.
+  private var pending: PendingAuthorization?
   /// Resumed by `handleCallback(url:)` so `authorize()` can return the final outcome.
+  ///
+  /// Deliberately **not** persisted, because it cannot be: a continuation is a resumption point
+  /// inside this process's stack, and a relaunched process has no stack to resume into. A callback
+  /// recovered after a termination therefore has nobody awaiting `authorize()`, and reaches the
+  /// host app the other way `handleCallback(url:)` already offers — as its return value. See there.
   private var pendingContinuation: CheckedContinuation<AuthResult, Never>?
   /// The in-flight refresh, if any. This single stored value *is* the single-flight guarantee.
   private var refreshTask: Task<TraciveTokens, Error>?
@@ -256,6 +276,10 @@ public actor TraciveOAuth {
   ///
   /// Calling it discards any previously prepared attempt: only one `state` can be outstanding, or
   /// a stale callback could satisfy the check.
+  ///
+  /// The attempt is written to `tokenStore` here, **before** the URL this returns can be opened,
+  /// which is what lets `handleCallback(url:)` finish a consent whose host app was terminated
+  /// meanwhile. Persisting afterwards would leave the window this exists to close.
   @discardableResult
   public func makeAuthorizationRequest() throws -> AuthorizationRequest {
     let pkce = pkceGenerator.generate()
@@ -264,7 +288,19 @@ public actor TraciveOAuth {
       configuration: configuration,
       pkce: pkce
     )
-    pending = pkce
+    let attempt = PendingAuthorization(
+      state: pkce.state,
+      codeVerifier: pkce.codeVerifier,
+      redirectUri: configuration.redirectUri.absoluteString,
+      createdAt: clock.now
+    )
+    pending = attempt
+    // Best effort, and deliberately so. The store is the *recovery* copy; `pending` above is what
+    // the ordinary flow runs on. Throwing here because the Keychain was momentarily unavailable
+    // would turn a degraded recovery into an authorization the user cannot start at all, which is
+    // the worse failure of the two — a store that cannot be written simply behaves as it did
+    // before this record existed.
+    try? tokenStore.savePending(attempt)
     return AuthorizationRequest(
       url: url,
       state: pkce.state,
@@ -283,6 +319,11 @@ public actor TraciveOAuth {
   /// If the user abandons the flow the suspension never ends on its own; call
   /// `cancelPendingAuthorization()` (for example when the partner screen is dismissed) to unblock
   /// it. Starting a second `authorize()` also releases the first.
+  ///
+  /// If the host app is **terminated** while the user is consenting, this `await` is gone with the
+  /// process and nothing can resume it. The authorization itself is not lost: the attempt was
+  /// persisted before the launch, and the relaunched process completes it through
+  /// `handleCallback(url:)`, whose return value is where the outcome arrives in that case.
   public func authorize() async -> AuthResult {
     // Never leave an earlier caller suspended forever.
     resumePending(with: .failed(.sdk("authorization_superseded", "A newer authorize() replaced this attempt.")))
@@ -291,7 +332,7 @@ public actor TraciveOAuth {
     // consent parameters to a browser fallback page.
     let probe = TraciveAppPresence.probeURL(for: environment)
     guard await appLauncher.canOpen(probe) else {
-      pending = nil
+      forgetPendingAuthorization()
       // Step 3: the clean install link, with no OAuth parameter on it whatsoever.
       _ = await appLauncher.open(installURL)
       return .appNotInstalled
@@ -339,7 +380,7 @@ public actor TraciveOAuth {
   /// continuation has already been resumed by whoever took the slot, so there is nothing stranded.
   private func abandonAttempt(withState state: String) {
     guard pending?.state == state else { return }
-    pending = nil
+    forgetPendingAuthorization()
     resumePending(
       with: .failed(.sdk("app_launch_failed", "The system declined to open the authorize link."))
     )
@@ -351,25 +392,57 @@ public actor TraciveOAuth {
   /// `scene(_:openURLContexts:)` / `scene(_:continue:)`. The result is both returned and delivered
   /// to whoever is awaiting `authorize()`, so either style works.
   ///
-  /// The `state` check runs **before** anything else, including the `error` parameter: a callback
-  /// whose state does not match ours is not ours, and reading its contents at all would be acting
-  /// on an attacker-supplied URL.
+  /// **Use the return value.** It is the only channel that works when the host app was terminated
+  /// while the user was consenting — a common fate for a backgrounded app, and the case the
+  /// persisted attempt exists for. The relaunched process rebuilds this actor, finds the attempt in
+  /// `tokenStore`, and completes the exchange exactly as if nothing had happened; but there is no
+  /// suspended `authorize()` left anywhere to resume, so the outcome arrives here and nowhere else.
+  /// A host app that discards it will store a perfectly good grant and never notice it did.
+  ///
+  /// The attempt is expired before anything is read from the URL, and the `state` check runs
+  /// **before** the rest — including the `error` parameter: a callback whose state does not match
+  /// ours is not ours, and reading its contents at all would be acting on an attacker-supplied URL.
   @discardableResult
   public func handleCallback(url: URL) async -> AuthResult {
-    guard let pkce = pending else {
+    // In-memory first, store second. The store is only consulted when this process has no memory of
+    // an attempt, which is exactly the post-termination case.
+    guard let attempt = pending ?? storedPendingAuthorization() else {
       // Nothing outstanding: a replayed, late or forged callback. There is no state to compare
       // against, so it fails the same way a mismatch does.
       return finish(.failed(.stateMismatch))
     }
 
+    if attempt.isStale(at: clock.now) {
+      // Checked before `state`, so an attempt nobody ever came back to is collected rather than
+      // left in the Keychain until something happens to dislodge it. Reported with its own code
+      // rather than as `.stateMismatch`: this one means "start again", not "somebody may be
+      // attacking you", and a partner should be able to tell those apart.
+      forgetPendingAuthorization()
+      return finish(
+        .failed(
+          .sdk(
+            "authorization_expired",
+            "The authorization attempt is older than \(Int(PendingAuthorization.maxAge / 60)) "
+              + "minutes and can no longer be completed. Start it again."
+          )
+        )
+      )
+    }
+
     let parameters = Self.queryParameters(of: url)
 
-    guard let state = parameters["state"], traciveConstantTimeEquals(state, pkce.state) else {
+    guard let state = parameters["state"], traciveConstantTimeEquals(state, attempt.state) else {
+      // The record is deliberately **not** cleared here, and this is the one terminal-looking
+      // outcome that must not clear it. Any app on the device can hand the host app a URL, so
+      // clearing on a mismatch would let a stray or hostile redirect cancel the consent the user is
+      // in the middle of — a denial of service that costs an attacker one `open`. Nothing is spent
+      // by a mismatch, so nothing needs consuming: a genuinely abandoned attempt is collected by
+      // the expiry above instead, and a spent one was cleared by whichever branch spent it.
       return finish(.failed(.stateMismatch))
     }
 
-    // One callback per attempt: consume the PKCE material now so a replay cannot re-enter.
-    pending = nil
+    // One callback per attempt: consume the material now so a replay cannot re-enter.
+    forgetPendingAuthorization()
 
     if let errorCode = parameters["error"] {
       if errorCode == "access_denied" {
@@ -398,15 +471,19 @@ public actor TraciveOAuth {
       return finish(
         .codeReceived(
           code: code,
-          codeVerifier: pkce.codeVerifier,
-          redirectUri: configuration.redirectUri.absoluteString
+          codeVerifier: attempt.codeVerifier,
+          redirectUri: attempt.redirectUri
         )
       )
     }
 
     do {
       let generation = tokenGeneration
-      let tokens = try await exchange(code: code, codeVerifier: pkce.codeVerifier)
+      let tokens = try await exchange(
+        code: code,
+        codeVerifier: attempt.codeVerifier,
+        redirectUri: attempt.redirectUri
+      )
 
       // Same race as the one `performRefresh` guards: the code exchange is a round trip, and a
       // `signOut()` during it must win. Storing here would hand the user a live grant they never
@@ -440,7 +517,7 @@ public actor TraciveOAuth {
   /// the user refusing consent *inside Tracive*, and conflating the two would tell a partner its
   /// offer was rejected when the user merely tapped Back.
   public func cancelPendingAuthorization() {
-    pending = nil
+    forgetPendingAuthorization()
     resumePending(
       with: .failed(.sdk("authorization_cancelled", "The authorization attempt was cancelled."))
     )
@@ -529,6 +606,7 @@ public actor TraciveOAuth {
   /// guarantees more failed calls.
   public func clearStoredTokens() {
     tokenGeneration &+= 1
+    pending = nil
     try? tokenStore.clear()
   }
 
@@ -553,6 +631,8 @@ public actor TraciveOAuth {
     tokenGeneration &+= 1
     refreshTask?.cancel()
     refreshTask = nil
+    // `tokenStore.clear()` erases the persisted attempt as well as the tokens, so a verifier cannot
+    // outlive a sign-out; this drops the in-memory copy in the same breath.
     pending = nil
     try? tokenStore.clear()
 
@@ -581,12 +661,19 @@ public actor TraciveOAuth {
 
   // MARK: - Wire
 
-  private func exchange(code: String, codeVerifier: String) async throws -> TraciveTokens {
+  /// - Parameter redirectUri: taken from the pending record rather than from `configuration`,
+  ///   because RFC 6749 §4.1.3 requires the exchange to repeat the URI the authorization was
+  ///   *started* with, and a relaunched process could in principle be configured with another one.
+  private func exchange(
+    code: String,
+    codeVerifier: String,
+    redirectUri: String
+  ) async throws -> TraciveTokens {
     // No `client_secret`: this is a public client, and PKCE is what replaces it.
     let body = FormURLEncoding.encode([
       (name: "grant_type", value: "authorization_code"),
       (name: "code", value: code),
-      (name: "redirect_uri", value: configuration.redirectUri.absoluteString),
+      (name: "redirect_uri", value: redirectUri),
       (name: "client_id", value: configuration.clientId),
       (name: "code_verifier", value: codeVerifier),
     ])
@@ -677,6 +764,25 @@ public actor TraciveOAuth {
 
   private func storedTokens() -> TraciveTokens? {
     (try? tokenStore.load()) ?? nil
+  }
+
+  /// The attempt this SDK persisted before the last launch, if the store kept one.
+  ///
+  /// A read failure reads as "no attempt". There is nothing better to do with it: the alternative
+  /// outcome is the same dead flow, reported as a Keychain error the partner cannot act on.
+  private func storedPendingAuthorization() -> PendingAuthorization? {
+    (try? tokenStore.loadPending()) ?? nil
+  }
+
+  /// Drops the attempt from both places it can live.
+  ///
+  /// Called on every outcome that spends or abandons an attempt, so neither a completed nor a
+  /// walked-away-from consent leaves a usable `code_verifier` behind for a later callback to
+  /// replay. The one exception is a `state` mismatch — see `handleCallback(url:)` for why clearing
+  /// there would hand any app on the device a way to cancel a consent in progress.
+  private func forgetPendingAuthorization() {
+    pending = nil
+    try? tokenStore.savePending(nil)
   }
 
   private func clearRefreshTask() {

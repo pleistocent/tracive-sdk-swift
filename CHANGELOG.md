@@ -33,6 +33,62 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **An authorization did not survive the host app being terminated during consent, and the loss was
+  reported as a state mismatch.** The pending attempt — the PKCE `code_verifier` and the `state` —
+  was a field on the actor and nothing else. But consent happens in *another* app: the host app is
+  backgrounded for the whole of the user's visit to Tracive, and the background is where iOS looks
+  first when it needs memory. When the app was collected there, the verifier went with it; the
+  Universal Link relaunched the app, the callback arrived, `state` matched nothing, and the user —
+  who had consented perfectly successfully — landed in a dead flow. Nothing distinguished it from a
+  CSRF attempt, because the SDK reported it as `.failed(.stateMismatch)`, which is what an attack
+  looks like. On an older device this is not an edge case; it is the ordinary fate of a backgrounded
+  app.
+
+  The attempt is now written to the Keychain-backed token store **before** the authorize URL is
+  opened, and read back in `handleCallback(url:)` when this process has no memory of one. The
+  ordering is the mechanism: the app can only be killed once it is in the background, which is after
+  the launch, so a record written afterwards would not exist during the one window that matters. It
+  goes to the secure store and nowhere else — the verifier is the secret half of the code exchange,
+  so `UserDefaults` and a plain file are as forbidden for it as they are for a refresh token. The
+  exchange also replays the `redirect_uri` recorded with the attempt rather than re-reading it from
+  the configuration, because RFC 6749 §4.1.3 asks for the URI the authorization was *started* with.
+
+  The record expires after **ten minutes** (`PendingAuthorization.maxAge`), which is the lifetime of
+  the authorization code itself. Holding the verifier longer buys no additional recovery — the code
+  it would be exchanged with is already dead server-side — while a longer window does leave a live
+  secret on the device with nothing to spend it on. A callback for an older attempt fails with
+  `serverCode == "authorization_expired"` rather than `.stateMismatch`: "start again" and "somebody
+  may be attacking you" are different messages and a partner should be able to tell them apart. The
+  window is pinned by tests at absolute seconds either side of the boundary, not at
+  `maxAge ± 1`, because a test written against the constant it is testing passes at any window size
+  and is how such a value drifts unnoticed; and `isStale(at:)` takes no per-call override, so there
+  is exactly one number.
+
+  The record is erased on every outcome that spends or abandons an attempt — success, `.denied`, a
+  server-reported error, a failed exchange, a refused launch, `cancelPendingAuthorization()`,
+  `signOut()` and `clearStoredTokens()` — so a spent callback cannot be replayed, by this process or
+  a later one, and a sign-out cannot leave a spendable verifier behind. A `state` **mismatch** is
+  the one deliberate exception: any app on the device can hand the host app a URL, and erasing there
+  would let a stray or hostile redirect cancel the consent the user is in the middle of for the cost
+  of one `open`. Nothing is spent by a mismatch, so nothing needs consuming, and an attempt nobody
+  returns to is collected by the expiry instead. The Flutter SDK makes the same exception for the
+  same reason.
+
+  **New public API, purely additive.** `PendingAuthorization` (a `Codable`, self-redacting record)
+  and two `TraciveTokenStore` requirements, `loadPending()` and `savePending(_:)`. Both have default
+  implementations that persist nothing, so a host app that already conforms its own vault to the
+  protocol keeps compiling and keeps behaving exactly as before: the SDK still holds the attempt in
+  memory too, and only consults the store when its own field is empty. Such a store forgoes the
+  recovery and nothing else; implementing the two methods gets it back.
+
+  **No new API was needed to deliver a recovered authorization, and none was added for it.**
+  `handleCallback(url:)` already returns the `AuthResult`. That matters more than it sounds: the
+  continuation `authorize()` suspends on cannot be persisted — it is a point in a process's stack,
+  and a relaunched process has none — so after a termination there is nobody to resume and the
+  return value is the *only* channel. It is now documented as the one to use. An app that discards
+  it will store a perfectly good grant and never notice. `Docs/oauth.md` and diagram 2 of
+  `Docs/architecture.md` describe the persisted record, its expiry and this consequence.
+
 - **`TraciveQuery.email(value:)` accepted anything non-empty, and every typo was billed.**
   `email("budi")` built `EMAIL_budi` and sent it. The server applies no shape validation to an
   email, so that is a perfectly legal record key: it is looked up, it misses, and the miss is

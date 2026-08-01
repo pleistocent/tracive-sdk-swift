@@ -347,6 +347,12 @@ public actor TraciveClient {
 
   /// Forwards the redirect from `AppDelegate`/`SceneDelegate`. See
   /// `TraciveOAuth.handleCallback(url:)`.
+  ///
+  /// **Handle the returned `AuthResult` here, not only where `authorize()` was called.** If iOS
+  /// terminated the app while the user was consenting — which it is entitled to do, because the app
+  /// is backgrounded for the whole of that visit — the SDK still completes the authorization from
+  /// its persisted record, but the `await` on `authorize()` died with the old process and this
+  /// return value is the only place the outcome appears.
   @discardableResult
   public func handleCallback(url: URL) async -> AuthResult {
     guard let oauth else {

@@ -142,20 +142,27 @@ func connectTracive() async throws {
 }
 ```
 
-Then route the callback:
+Then route the callback — and **handle its result here too**, with the same `handle(_:)` above:
 
 ```swift
 // SwiftUI
 .onOpenURL { url in
-  Task { await tracive.handleCallback(url: url) }
+  Task { handle(await tracive.handleCallback(url: url)) }
 }
 
 // UIKit
 func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
   guard let url = userActivity.webpageURL else { return }
-  Task { await tracive.handleCallback(url: url) }
+  Task { handle(await tracive.handleCallback(url: url)) }
 }
 ```
+
+Handling it in both places is not belt and braces. Consent happens inside the Tracive app, so your
+app is backgrounded throughout and iOS may terminate it there. The SDK survives that — it persists
+the pending authorization and the relaunched app completes the exchange — but the `await` on
+`authorize()` died with the old process, so in that case this return value is the only place the
+outcome appears. Ignore it and you will store a valid grant while your UI still shows a
+"Connect Tracive" button. See [oauth.md](oauth.md).
 
 ## 6. Run a check
 

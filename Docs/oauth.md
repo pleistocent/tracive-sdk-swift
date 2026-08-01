@@ -20,16 +20,79 @@ Partner app                    Tracive app                 Tracive server
      │
      │    yes
      │ 2. generate code_verifier, code_challenge (S256), state
+     │    write the pending attempt to the Keychain  ← before anything is opened
      │ 3. UIApplication.open(authorize URL)  ─────────────▶
      │                                    user reviews scopes
+     │        (your app is backgrounded here, and may be terminated)
      │                                    ◀───── POST consent ─────▶
      │ 4. ◀── Universal Link redirect: ?code=…&state=…
-     │ 5. handleCallback(url:): verify state
+     │ 5. handleCallback(url:): read the pending attempt back, expire it if
+     │    it is over 10 minutes old, then verify state
      │ 6. POST /oauth/token  (code + code_verifier)  ─────────────────────▶
      │ 7. ◀── access_token (JWT, 1 h) + refresh_token (opaque, rotating)
-     │    store both in the Keychain
+     │    store both in the Keychain, erase the pending attempt
      │    return .authorized(grantedScopes)
 ```
+
+## Surviving a termination mid-consent
+
+Consent happens **in another app**. For its whole duration your app is in the background, which is
+where iOS looks first when it needs memory — so being killed there is ordinary, not exotic,
+especially on older devices.
+
+The SDK writes the pending attempt (`state`, `code_verifier`, `redirect_uri`, a creation timestamp)
+to the same Keychain-backed store as the tokens, **before** it opens the authorize URL. When the
+Universal Link relaunches your app, `handleCallback(url:)` reads it back and finishes the exchange
+as if nothing had happened. Without this the verifier would die with the process, `state` would
+match nothing, and a user who consented perfectly successfully would land in a dead flow reported as
+`.failed(.stateMismatch)` — indistinguishable, from your side, from a CSRF attempt.
+
+It goes to the Keychain and nowhere else, because the `code_verifier` is the secret half of the code
+exchange. Never `UserDefaults`, never a file — the same rule as the tokens.
+
+**This is the reason to use `handleCallback(url:)`'s return value:**
+
+```swift
+func scene(_ scene: UIScene, continue activity: NSUserActivity) {
+  guard let url = activity.webpageURL else { return }
+  Task {
+    let result = await tracive.oauth?.handleCallback(url: url)
+    // Handle `result` here, not only where you called authorize().
+  }
+}
+```
+
+`authorize()` suspends until the callback arrives, and in the ordinary case its `await` returns the
+same value. But a continuation is a point in your *process's* stack: if the process was killed there
+is nothing left to resume, and the relaunched one never called `authorize()` at all. The
+authorization still completes and the grant is still stored — the outcome simply arrives as the
+return value and nowhere else. An app that ignores it will authorize successfully and never notice.
+
+### The attempt expires after 10 minutes
+
+Ten minutes is the lifetime of the authorization code itself. Keeping the verifier for longer buys
+no extra recovery, because by then the code it would be exchanged with is already dead server-side;
+all a longer window adds is a live secret on the device with nothing to spend it on. A callback for
+an older attempt fails with `TraciveError`, `serverCode == "authorization_expired"` — its own code,
+not `.stateMismatch`, because "start again" and "somebody may be attacking you" are different
+messages. Send the user back through `authorize()`.
+
+The record is erased on every outcome that spends or abandons an attempt: success, `.denied`, a
+server-reported error, a failed exchange, `cancelPendingAuthorization()`, `signOut()` and
+`clearStoredTokens()`. So a spent callback cannot be replayed, even by a later process.
+
+The one deliberate exception is a `state` **mismatch**, which leaves the record alone. Any app on
+the device can hand yours a URL; if a mismatched redirect erased the pending attempt, an attacker
+could cancel a consent your user is in the middle of for the cost of one `open`. Nothing is spent by
+a mismatch, so nothing needs consuming — an attempt nobody comes back to is collected by the
+ten-minute expiry instead.
+
+### If you supply your own `TraciveTokenStore`
+
+`loadPending()` and `savePending(_:)` have default implementations that persist nothing, so a store
+written before this existed still compiles and still behaves exactly as it did. What it gives up is
+only this recovery: the SDK also keeps the attempt in memory, so every in-process flow is unaffected.
+Implement both — writing to wherever you keep the tokens — to get termination recovery back.
 
 ## PKCE
 
@@ -266,6 +329,10 @@ The whole flow is unit-testable with no server and no browser:
 - call `handleCallback(url:)` directly with a hand-built redirect URL. Test the good path, a wrong
   `state` (must give `.failed(.stateMismatch)`), a `?error=access_denied` (must give `.denied`), and
   a URL with neither a code nor an error;
+- simulate a termination mid-consent by building **two** `TraciveOAuth` instances over **one**
+  token store: start the attempt on the first, throw it away, and deliver the callback to the
+  second. That is exactly what a relaunch is — the store survives, the process does not — and it
+  must still reach `.authorized`. Advance an injected clock past ten minutes for the expiry case;
 - for the single-flight property, fire several requests concurrently against a transport that returns
   `401 expired_token` and assert that `POST /oauth/token` was hit **exactly once**. That assertion is
   the one worth writing: it is the failure that would otherwise show up as random sign-outs in
