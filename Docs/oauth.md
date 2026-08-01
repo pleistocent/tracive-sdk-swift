@@ -261,6 +261,29 @@ rotation is another chance to present a token the server has already retired, wh
 detection may read as a stolen-token replay and answer by revoking the grant. The server's clock
 decides.
 
+### A blank stored access token is refreshed, not sent
+
+There is one exception to "the stored access token is sent as it is", and it is not an expiry rule:
+a stored access token that is **empty**. `TraciveTokens.accessToken` is a plain `String`, so a
+record whose `access_token` is `""` decodes as cleanly as any other — a partial write, a Keychain
+save interrupted by a termination, or a restored backup can each leave one behind, with the refresh
+token beside it completely intact.
+
+The SDK refreshes that grant instead of sending `Bearer `, and returns the fresh token. The refresh
+token is the grant, and it is still good; throwing it away because a different field is empty would
+sign the user out of something that still works. If there is no refresh token either, there is
+nothing to renew with: the unusable record is cleared and the call fails with
+`TraciveError.grantRevoked`, after which the next call reports `no_grant`. Send the user through
+`authorize()`.
+
+Do not expect the 401 path to cover this for you if you are reimplementing the token layer. An empty
+bearer is malformed rather than expired, so the server answers `invalid_token` — which is terminal
+here, as it should be — and the damaged record fails permanently instead of healing, one wasted
+round trip at a time. The client-side check is the only thing that can recover it.
+
+`TraciveOAuth.accessToken()` is `async` for this reason. Nothing changes at your call site: it is a
+method on an `actor`, so every call from outside was already `await`ed.
+
 ### Refresh is single-flight
 
 On a `401 expired_token` the SDK refreshes and replays the request. Concurrent 401s trigger

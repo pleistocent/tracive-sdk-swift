@@ -1502,6 +1502,83 @@ final class OAuthTests: XCTestCase {
     XCTAssertFalse(authorized)
   }
 
+  /// A blank access token is a damaged record, not an absent grant — and the refresh token beside
+  /// it is the part that matters, so the grant is renewed rather than thrown away.
+  ///
+  /// `TraciveTokens` is `Codable` over a plain `String`, so a stored `access_token` of `""` decodes
+  /// as cleanly as any other value; a partial write, a Keychain save interrupted by a termination,
+  /// or a restored backup can all produce one.
+  func testABlankAccessTokenIsRefreshedRatherThanReturned() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.damagedTokens)
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let token = try await oauth.accessToken()
+
+    XCTAssertEqual(token, "access-2")
+    XCTAssertEqual(transport.count(pathSuffix: "/oauth/token"), 1)
+    // The refresh sent the stored refresh token, which is the only credential the record had left.
+    XCTAssertEqual(Self.formFields(transport.requests.first?.body)["refresh_token"], "refresh-1")
+    XCTAssertEqual(try store.load()?.accessToken, "access-2")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
+  }
+
+  /// With no refresh token there is nothing to renew with, so the record is terminal. It is also
+  /// cleared, which is what makes the *next* call report `no_grant` rather than repeating this.
+  func testABlankAccessTokenWithNoRefreshTokenIsTerminal() async throws {
+    let store = InMemoryTokenStore(
+      tokens: TraciveTokens(accessToken: "", refreshToken: nil, scopes: ["scammer.check"])
+    )
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let error = await expectTraciveError { try await oauth.accessToken() }
+
+    XCTAssertEqual(error?.kind, .grantRevoked)
+    XCTAssertEqual(transport.callCount, 0, "there was nothing to send and nothing was sent")
+    XCTAssertNil(try store.load())
+    let authorized = await oauth.isAuthorized
+    XCTAssertFalse(authorized)
+
+    let again = await expectTraciveError { try await oauth.accessToken() }
+    XCTAssertEqual(again?.serverCode, "no_grant")
+  }
+
+  /// The recovery goes through the ordinary `refreshTokens(…)`, so it inherits the single-flight
+  /// guarantee rather than opening a second door around it.
+  ///
+  /// This is the property worth pinning: two simultaneous refreshes present the same rotating
+  /// token twice, which the server's reuse detection is entitled to read as a stolen-token replay
+  /// and answer by revoking the whole grant. A private refresh path here would have been invisible
+  /// to `refreshTask` and would have raced with every 401-driven refresh in flight.
+  func testConcurrentBlankAccessTokenReadsProduceExactlyOneRefresh() async throws {
+    let gate = TestGate()
+    let store = InMemoryTokenStore(tokens: Fixtures.damagedTokens)
+    let transport = FakeHTTPTransport { _, _ in
+      await gate.wait()
+      return .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let tokens = await withTaskGroup(of: String?.self) { group -> [String?] in
+      for _ in 0..<6 {
+        group.addTask { try? await oauth.accessToken() }
+      }
+      // Let the first caller reach the transport before releasing it, so the others really do race
+      // rather than arriving after the refresh has already finished.
+      _ = await waitUntil { transport.callCount >= 1 }
+      await gate.open()
+
+      var collected: [String?] = []
+      for await token in group { collected.append(token) }
+      return collected
+    }
+
+    XCTAssertEqual(tokens.count, 6)
+    XCTAssertTrue(tokens.allSatisfy { $0 == "access-2" })
+    XCTAssertEqual(transport.count(pathSuffix: "/oauth/token"), 1)
+  }
+
   func testTokensDescriptionRedactsBothSecrets() {
     let description = String(describing: Fixtures.storedTokens)
     XCTAssertFalse(description.contains("access-1"))

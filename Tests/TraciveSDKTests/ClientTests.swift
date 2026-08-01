@@ -967,6 +967,68 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 0)
   }
 
+  // MARK: - A blank stored access token
+
+  /// A stored grant whose access token is blank but whose refresh token is intact.
+  ///
+  /// Reachable from a partial write, a Keychain save interrupted by a termination, or a restored
+  /// backup: `TraciveTokens.accessToken` is a plain `String`, so a record holding `""` decodes as
+  /// cleanly as any other. The refresh token beside it is untouched, and that is the grant — so the
+  /// SDK renews rather than sending `Bearer ` or discarding a credential that still works.
+  ///
+  /// The 401 path cannot stand in for this. An empty bearer is malformed, not expired: the server
+  /// answers `invalid_token`, and this SDK treats that as terminal — see
+  /// `testInvalidTokenIsSurfacedWithoutAttemptingARefresh`. So the damaged record would fail
+  /// permanently rather than heal, one wasted round trip at a time.
+  func testABlankStoredAccessTokenIsRefreshedInsteadOfBeingSent() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.damagedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      request.url.path.hasSuffix("oauth/token")
+        ? .ok(json: Fixtures.refreshedTokenJSON)
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    let result = try await client.checkScammer(TestQueries.phone)
+
+    // The caller never sees the damage at all.
+    XCTAssertEqual(result.riskTier, .high)
+    // One refresh, and the check goes out **once** — the recovery happens before the first send,
+    // so no round trip is spent discovering it.
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+    XCTAssertEqual(transport.requests.last?.header("Authorization"), "Bearer access-2")
+    Self.assertNoEmptyBearerReachedTheTransport(transport)
+    // Rotation landed, so the record is whole again rather than repaired for one call.
+    XCTAssertEqual(try store.load()?.accessToken, "access-2")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
+  }
+
+  /// The same damaged record with nothing to renew it. There is no credential left here, so this
+  /// is terminal — and it fails without spending a request, exactly as the no-grant path does.
+  func testABlankStoredAccessTokenWithNoRefreshTokenFailsBeforeAnyNetworkIO() async throws {
+    let unusable = TraciveTokens(
+      accessToken: "",
+      refreshToken: nil,
+      tokenType: "Bearer",
+      expiresAt: nil,
+      scopes: ["scammer.check", "credits.read"]
+    )
+    let store = InMemoryTokenStore(tokens: unusable)
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
+
+    XCTAssertEqual(error?.kind, .grantRevoked)
+    // Neither the check nor a refresh was attempted: nothing on the wire could have helped.
+    XCTAssertEqual(transport.callCount, 0)
+    Self.assertNoEmptyBearerReachedTheTransport(transport)
+    // The unusable record is gone, so `isAuthorized` stops claiming a grant and the next call
+    // reports `no_grant` — which is what this record amounted to.
+    XCTAssertNil(try store.load())
+  }
+
   // MARK: - Privacy
 
   func testRequestDescriptionLeaksNeitherTokenNorIdentifier() async throws {
@@ -1021,6 +1083,27 @@ final class ClientTests: XCTestCase {
   private static func jsonObject(_ data: Data?) throws -> [String: Any] {
     let data = try XCTUnwrap(data)
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+  }
+
+  /// Asserts that no request carried an `Authorization` header with an empty token.
+  ///
+  /// Written against the header's *value* rather than against a request count, because a count
+  /// proves only that some request was skipped — this proves that whatever did go out was
+  /// authenticated. A bare `Bearer` with no trailing space is caught too: `setHeader` is given
+  /// `"Bearer " + token`, so an empty token produces the trailing-space form, but a future
+  /// refactor that trimmed would produce the other one and it would be no more valid.
+  private static func assertNoEmptyBearerReachedTheTransport(
+    _ transport: FakeHTTPTransport,
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) {
+    let empties = transport.requests
+      .compactMap { $0.header("Authorization") }
+      .filter { $0.trimmingCharacters(in: .whitespaces) == "Bearer" }
+    XCTAssertEqual(
+      empties, [],
+      "an empty bearer reached the transport", file: file, line: line
+    )
   }
 }
 
@@ -1343,6 +1426,19 @@ enum Fixtures {
 
   static let storedTokens = TraciveTokens(
     accessToken: "access-1",
+    refreshToken: "refresh-1",
+    tokenType: "Bearer",
+    expiresAt: nil,
+    scopes: ["scammer.check", "credits.read"]
+  )
+
+  /// `storedTokens` with the access token blanked and the refresh token left intact.
+  ///
+  /// Not a contrived value: `TraciveTokens.accessToken` is a plain `String`, so a stored record
+  /// whose `access_token` is `""` decodes as cleanly as any other — which is what a partial write,
+  /// a Keychain save interrupted by a termination, or a restored backup can leave behind.
+  static let damagedTokens = TraciveTokens(
+    accessToken: "",
     refreshToken: "refresh-1",
     tokenType: "Bearer",
     expiresAt: nil,

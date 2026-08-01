@@ -534,7 +534,32 @@ public actor TraciveOAuth {
   /// refresh on the 401 `expired_token` response, and the server's clock is the one that decides:
   /// refreshing off a device clock that has drifted forward would burn a refresh-token rotation
   /// (and edge the grant closer to reuse detection) for nothing.
-  public func accessToken() throws -> String {
+  ///
+  /// The one condition it does check is a stored access token that is **blank**, which is not the
+  /// same state as no grant at all. `TraciveTokens.accessToken` is a plain `String`, so a stored
+  /// record whose `access_token` is the empty string decodes perfectly cleanly to `""` — a partial
+  /// write, a Keychain save interrupted by a termination, or a restored backup can all leave one
+  /// behind. The refresh token sitting beside it is untouched, and a refresh token *is* the grant:
+  /// discarding it because a different field is empty throws away a credential that still works.
+  /// So a blank access token is refreshed rather than sent, and the fresh token is returned.
+  ///
+  /// The reactive 401 path cannot rescue this record, which is why the check is here rather than
+  /// left to the server. `Bearer ` is not an expired token, it is a malformed one: the server
+  /// answers `invalid_token`, and this SDK treats that as terminal — no refresh is attempted and
+  /// the grant is discarded. The damaged record would therefore not heal on the next request; it
+  /// would fail permanently, one wasted round trip at a time.
+  ///
+  /// With no refresh token beside it there is nothing to renew, and `refreshTokens(…)` says so in
+  /// its own words: it clears the unusable record and throws `.grantRevoked`. That is terminal in
+  /// the same way the `no_grant` guard above is, and it leaves the store in the state the record
+  /// really amounted to — so the next call reports `no_grant` and the host app sends the user
+  /// through `authorize()`.
+  ///
+  /// Ordinary calls pay one `isEmpty` for this and nothing else.
+  ///
+  /// The `async` belongs to the refresh. It costs external callers nothing: every call into an
+  /// actor from outside it is already awaited, whatever effects the method itself declares.
+  public func accessToken() async throws -> String {
     guard let tokens = storedTokens() else {
       throw TraciveError.invalidToken(
         TraciveErrorInfo(
@@ -543,7 +568,14 @@ public actor TraciveOAuth {
         )
       )
     }
-    return tokens.accessToken
+    guard tokens.accessToken.isEmpty else { return tokens.accessToken }
+    // Routed through the ordinary refresh rather than a private one, so this inherits the
+    // single-flight guarantee: a blank access token discovered while a refresh is already running
+    // waits for that one instead of starting a second, which is exactly what reuse detection
+    // punishes. Passing the blank token as the stale one also keeps the cheap half of the
+    // guarantee working — if another caller has already refreshed, its token is returned here with
+    // no round trip at all.
+    return try await refreshTokens(staleAccessToken: tokens.accessToken)
   }
 
   /// Refreshes the access token, **single-flight**.

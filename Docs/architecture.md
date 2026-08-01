@@ -194,11 +194,17 @@ token is sent whatever `expiresAt` says, including on the first request of a ses
 already passed. `TraciveTokens.isExpired(at:)` exists for a host app that wants to read the expiry
 itself; no path here calls it.
 
+The one thing the SDK does decide locally is whether the stored access token is **blank**, and that
+is not an expiry judgement — a blank token is not a token at all. See
+[below](#a-blank-access-token-is-refreshed-before-anything-is-sent) for why the server cannot be
+left to answer that one.
+
 ```mermaid
 flowchart TD
   S["sendAuthorized(request, isRetryable)"]
   A["oauth.accessToken()"]
   NG["throw .invalidToken with code no_grant"]
+  BK{"stored access token is blank"}
   B["attach Authorization Bearer and call transport.send"]
   TR{"isRetryable and attempts left"}
   W["sleep for the backoff, then resend"]
@@ -215,17 +221,20 @@ flowchart TD
   R2["return the stored token, no round trip"]
   R3{"a refresh task is already running"}
   R4["await that same task"]
+  R0{"a refresh token is stored"}
   R5["start the one refresh task"]
   R6["POST /v1/oauth/token with grant_type=refresh_token"]
   RV["tokenStore.clear, then throw .grantRevoked"]
   RTH["rethrow it, the stored tokens are left alone"]
   R7{"token generation unchanged"}
   R8["save previous.replacing(with: refreshed)"]
-  RP["replay the identical request"]
+  RD["the fresh access token, in hand"]
 
   S --> A
   A -->|"nothing stored"| NG
-  A -->|"access token"| B
+  A -->|"a grant is stored"| BK
+  BK -->|"no"| B
+  BK -->|"yes, refresh before anything is sent"| RF
   B -->|"transport threw"| TR
   TR -->|"yes"| W
   W --> A
@@ -245,18 +254,45 @@ flowchart TD
   R1 -->|"yes, someone else refreshed"| R2
   R1 -->|"no"| R3
   R3 -->|"yes"| R4
-  R3 -->|"no"| R5
+  R3 -->|"no"| R0
+  R0 -->|"no, nothing to renew with"| RV
+  R0 -->|"yes"| R5
   R5 --> R6
   R6 -->|"invalid_grant or grant_revoked"| RV
   R6 -->|"any other failure"| RTH
   R6 -->|"success"| R7
   R7 -->|"no, signed out mid-flight"| RV
   R7 -->|"yes"| R8
-  R2 --> RP
-  R4 --> RP
-  R8 --> RP
-  RP --> A
+  R2 --> RD
+  R4 --> RD
+  R8 --> RD
+  RD -->|"came from a 401: replay the identical request"| A
+  RD -->|"came from a blank token: send for the first time"| B
 ```
+
+### A blank access token is refreshed before anything is sent
+
+A stored grant can hold an empty access token beside a perfectly good refresh token.
+`TraciveTokens.accessToken` is a plain `String`, so a record whose `access_token` is `""` decodes as
+cleanly as any other — a partial write, a Keychain save interrupted by a termination, or a restored
+backup will all produce one.
+
+Two things could be done with such a record, and both are wrong. Sending it puts `Bearer ` on the
+wire. Discarding it throws away the refresh token, which *is* the grant and is still live. So the
+SDK refreshes: the grant is renewed before the first request leaves, and the caller never learns
+anything was wrong.
+
+The reactive 401 path cannot do this job, which is why the check is on the client side. An empty
+bearer is not an expired token, it is a malformed one — the server answers `invalid_token`, and this
+SDK treats `invalid_token` as terminal: no refresh is attempted and the grant is discarded. A
+damaged record left to the server therefore never heals. It fails permanently, spending a round trip
+each time to be told something that was knowable before the send.
+
+The renewal goes through the same `refreshTokens(…)` as the 401 path rather than a private one, so
+it inherits the single-flight guarantee below: a blank token discovered while a refresh is already
+running joins that refresh instead of racing it. With no refresh token beside it there is nothing to
+renew with, the unusable record is cleared, and `.grantRevoked` is thrown — terminal in the same way
+the `no_grant` guard is, and the next call reports `no_grant`, which is what the record amounted to.
 
 ### Single-flight, and why it is not an optimisation
 

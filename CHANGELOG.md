@@ -33,6 +33,53 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **A stored grant whose access token was blank put `Bearer ` on the wire, and could never
+  recover.** `TraciveTokens.accessToken` is a plain `String`, so a stored record whose
+  `access_token` is the empty string decodes exactly as cleanly as any other value — a partial
+  write, a Keychain save interrupted by a termination, or a restored backup will each leave one
+  behind, with the refresh token beside it completely intact. `accessToken()` returned whatever it
+  found once a grant existed, so the SDK authenticated its next request with an empty bearer.
+
+  It now attempts the refresh instead and returns the fresh token, so the grant is renewed before
+  the first request leaves and the caller never learns anything was wrong. Both of the other
+  options are worse: sending an empty bearer authenticates nothing, and treating the record as "no
+  grant" would discard a refresh token that is still live — and the refresh token *is* the grant.
+  One field of local storage being empty is not a reason to sign a user out of something that
+  still works.
+
+  **The reactive 401 path could not have covered this**, which is why the check belongs on the
+  client. An empty bearer is not an expired token, it is a malformed one: the server answers
+  `invalid_token`, which this SDK treats as terminal — no refresh is attempted and the grant is
+  dropped. A damaged record left to the server therefore never healed. It failed permanently, one
+  wasted round trip at a time, and the round trip bought nothing that was not already knowable
+  before the send.
+
+  With no refresh token beside it there is nothing to renew with, and the existing
+  `refreshTokens(…)` already says so: it clears the unusable record and throws `.grantRevoked`.
+  That is terminal in the same way the `no_grant` guard above it is, and it leaves the store
+  holding what the record actually amounted to — so the next call reports `no_grant` and the host
+  app sends the user through `authorize()`.
+
+  The recovery is routed through the ordinary `refreshTokens(…)` rather than a private refresh, so
+  it inherits the single-flight guarantee rather than opening a second door around it. A blank
+  token discovered while a refresh is already running joins that refresh instead of racing it —
+  two simultaneous refreshes present the same rotating token twice, which is what reuse detection
+  revokes a grant for. An ordinary call with a usable token pays one `isEmpty` and nothing else.
+
+  **`accessToken()` gains `async` and is now `public func accessToken() async throws -> String`.**
+  Refreshing is asynchronous, so the guard cannot live here without it. **This is not
+  source-breaking for callers outside the actor, which is every caller an integrator normally
+  has:** `TraciveOAuth` is an `actor`, so a call from any other isolation domain was already
+  awaited, and `try await oauth.accessToken()` compiles unchanged. `TraciveClient` needed no edit
+  at all. The one shape that does break is a *synchronous* call made from inside the actor's own
+  isolation — an `extension TraciveOAuth` written in your own module — which now needs `await` like
+  every other call; nothing in this package had one.
+
+  `Docs/oauth.md` and diagram 3 of `Docs/architecture.md` describe the branch, and the diagram also
+  gains the "is there a refresh token at all" decision it had always omitted, which is the node
+  this new path can reach. The React Native SDK applies the identical rule, and the four SDKs are
+  standardising on it.
+
 - **An authorization did not survive the host app being terminated during consent, and the loss was
   reported as a state mismatch.** The pending attempt — the PKCE `code_verifier` and the `state` —
   was a field on the actor and nothing else. But consent happens in *another* app: the host app is
