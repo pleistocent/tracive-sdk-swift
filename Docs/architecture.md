@@ -374,6 +374,12 @@ Validation is first and local; the cache is next; the network is last. The order
 not just hygiene — a miss is billed exactly like a hit, so a key that could never hit is a credit
 spent on nothing.
 
+`latchedFetch` sits in front of the request for the same reason. Two checks for the same record key,
+detail and locale — a double-tapped button, or the same number appearing twice in a list — collapse
+into one request and one bill. Your own `idempotencyKey` is part of the latch key, so two callers who
+deliberately keyed themselves apart stay apart; a caller who passes no key changes nothing. The store
+happens inside the flight, so a collapsed check is written once.
+
 ```mermaid
 flowchart TD
   Q["TraciveQuery builder folds and validates"]
@@ -393,6 +399,7 @@ flowchart TD
   CF{"cacheApplies and a fresh row exists"}
   HIT["return it, zero credits and no network traffic"]
 
+  LATCH["latchedFetch joins the check already in flight, or starts one.<br/>Keyed on the record key, the detail, the locale, and your idempotencyKey when you supplied one."]
   F["fetchAndStore"]
   BODY["body carries creditSource USER, detail, query, and locale only when detail is .full"]
   IDK["Idempotency-Key is yours, or an SDK-generated one prefixed sdk-"]
@@ -423,11 +430,12 @@ flowchart TD
 
   SRC -->|".cacheFirst, the default"| CF
   CF -->|"yes"| HIT
-  CF -->|"no"| F
+  CF -->|"no"| LATCH
 
-  SRC -->|".server"| F
-  SRC -->|".serverFirst"| F
+  SRC -->|".server"| LATCH
+  SRC -->|".serverFirst"| LATCH
 
+  LATCH --> F
   F --> BODY
   BODY --> IDK
   IDK --> SEND

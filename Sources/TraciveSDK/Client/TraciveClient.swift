@@ -546,8 +546,9 @@ public actor TraciveClient {
   /// depended on it.
   ///
   /// The cache write lives inside the flight rather than in each caller, so a collapsed check is
-  /// stored once. React Native latches the network call only and writes per caller; the observable
-  /// behaviour is the same and the request count — the thing that is billed — is identical.
+  /// stored once. Kotlin does the same; React Native and Flutter latch the network call only and
+  /// write per caller. The observable behaviour is the same either way, and the request count — the
+  /// thing that is billed — is identical.
   private func latchedFetch(
     _ query: TraciveQuery,
     detail: Detail,
