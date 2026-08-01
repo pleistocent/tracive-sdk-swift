@@ -68,6 +68,16 @@ normalizer. If your implementation disagrees with a vector, your implementation 
 
 A grammar change starts at the Tracive API and lands in all four SDKs together, or it drifts.
 
+Its SHA-256 is pinned in `query-grammar-vectors.sha256` beside it, and two things read that one
+file: `testTheFixtureMatchesItsPinnedContentHash`, so the fixture cannot move without `swift test`
+going red on your own machine, and a `shasum -a 256 -c` step in CI. Neither of them looks at the
+JSON's meaning, which is the point — every other test decodes the file and drives its vectors, so
+reindenting it or reordering its keys used to change nothing anybody could see. An audit proved it
+by reformatting the fixture from 21 662 bytes to 32 533 and watching all 259 tests stay green.
+
+If the pin goes red, the fixture moved. Re-pinning is the wrong repair unless the new bytes came
+from upstream and are landing in the other three repositories in the same breath.
+
 ---
 
 ## Foundation's defaults are not the specification

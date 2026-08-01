@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 
 @testable import TraciveSDK
@@ -118,6 +119,35 @@ final class QueryGrammarTests: XCTestCase {
     return try Data(contentsOf: onDisk)
   }
 
+  /// The pinned digest, read from the sidecar `query-grammar-vectors.sha256`.
+  ///
+  /// The file is in `shasum -a 256` output format — `<digest>  <path>` — so CI can hand it straight
+  /// to `shasum -a 256 -c` and both checks read the same value. Keeping the digest out of this
+  /// source file is what stops the two from drifting: there is one place to update, and updating it
+  /// is visible in the diff next to the fixture it describes.
+  private static func loadPinnedFixtureDigest() throws -> String {
+    let data: Data
+    if let url = Bundle.module.url(forResource: "query-grammar-vectors", withExtension: "sha256")
+      ?? Bundle.module.url(forResource: "Fixtures/query-grammar-vectors", withExtension: "sha256")
+    {
+      data = try Data(contentsOf: url)
+    } else {
+      let sourceDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      data = try Data(
+        contentsOf: sourceDirectory
+          .appendingPathComponent("Fixtures")
+          .appendingPathComponent("query-grammar-vectors.sha256")
+      )
+    }
+    let text = String(decoding: data, as: UTF8.self)
+    guard let digest = text.split(whereSeparator: \.isWhitespace).first else {
+      throw MalformedDigestPin(contents: text)
+    }
+    return String(digest).lowercased()
+  }
+
+  private struct MalformedDigestPin: Error { let contents: String }
+
   private func loadFixture() throws -> Fixture {
     let data = try QueryGrammarTests.loadFixtureData()
     return try JSONDecoder().decode(Fixture.self, from: data)
@@ -189,6 +219,46 @@ final class QueryGrammarTests: XCTestCase {
   private struct RawEntryNotRejected: Error { let value: String }
 
   // MARK: - Tests
+
+  /// The fixture is pinned by content hash, and this is what notices when its bytes move.
+  ///
+  /// Every other test in this file reads the file's *meaning*: it decodes the JSON and drives the
+  /// vectors through the folding code. That leaves a whole class of change invisible — reindenting,
+  /// reordering keys, rewriting a number in an equivalent form, re-exporting through a tool that
+  /// pretty-prints. An audit demonstrated exactly that here: it reformatted this fixture from
+  /// 21 662 bytes to 32 533, a completely different file on disk, and all 259 tests stayed green.
+  ///
+  /// "Semantics-preserving, therefore harmless" is the reasoning to distrust. This file is vendored
+  /// **byte-identically** into four SDK repositories, and that is the entire mechanism by which they
+  /// are known to agree: one `shasum` per repository, four identical answers, no interpretation
+  /// required. Reformat one copy and that question can no longer be asked — the next genuine grammar
+  /// change then lands in a copy nobody can diff against the others, and the drift this fixture
+  /// exists to prevent starts in the one place designed to prove it had not happened.
+  ///
+  /// So a changed digest is not an error to fix by re-pinning. It means the fixture moved, and a
+  /// grammar change starts at the Tracive API and lands in all four SDKs together. See
+  /// CONTRIBUTING.md.
+  func testTheFixtureMatchesItsPinnedContentHash() throws {
+    let data = try QueryGrammarTests.loadFixtureData()
+    let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    // Read rather than inlined: CI's `shasum -a 256 -c` step checks the same sidecar, so the two
+    // guards cannot disagree about what is pinned.
+    let expected = try QueryGrammarTests.loadPinnedFixtureDigest()
+
+    XCTAssertEqual(
+      actual,
+      expected,
+      """
+      query-grammar-vectors.json no longer matches its pinned digest.
+      expected \(expected)
+      actual   \(actual) (\(data.count) bytes)
+
+      This file is vendored byte-identically into the Kotlin, Swift, Flutter and React Native SDKs.
+      Do not re-pin to make this pass: a grammar change starts at the Tracive API and lands in all
+      four together, and reformatting alone is not a change worth breaking that property for.
+      """
+    )
+  }
 
   func testFixtureIsTheExpectedContract() throws {
     let fixture = try loadFixture()

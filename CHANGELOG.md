@@ -383,6 +383,14 @@ source compatibility until the API freezes at 1.0.
 
 ### Internal
 
+- **The vendored grammar fixture is now pinned by content hash**, in `swift test` and in CI, both
+  reading one sidecar file. `query-grammar-vectors.json` is copied byte-identically into four SDK
+  repositories, and identical bytes are the whole mechanism by which they are known to agree — but
+  nothing here checked them. `QueryGrammarTests` decodes the file and drives its vectors, so it reads
+  the fixture's meaning and is blind to its bytes: an audit reformatted the fixture from 21 662 bytes
+  to 32 533 and watched all 259 tests stay green. That change is harmless to this SDK and fatal to
+  the cross-repo contract, because once one copy is reformatted the comparison stops being answerable
+  and the next real grammar change lands in a copy nobody can diff against the others.
 - The reactive refresh is now pinned at its coldest point: a session whose **first** request carries
   a stored token that expired while the app was closed. Every other refresh test began from a token
   the session had already used successfully, so the case with nothing standing in front of it was

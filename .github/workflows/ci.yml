@@ -88,6 +88,26 @@ jobs:
             echo "ok: no third-party dependency in ${manifest}/Package.swift"
           done
 
+      - name: The grammar fixture still has the bytes it is pinned to
+        # `query-grammar-vectors.json` is vendored byte-identically into four SDK repositories, and
+        # identical bytes are the whole mechanism by which they are known to agree: one `shasum` per
+        # repository, four identical answers, nothing to interpret.
+        #
+        # Nothing here checked that. `QueryGrammarTests` decodes the file and drives its vectors, so
+        # it reads the fixture's *meaning* and is blind to its bytes — an audit reformatted this
+        # fixture from 21 662 bytes to 32 533 and watched all 259 tests stay green. Reformatting is
+        # harmless to this SDK and fatal to the cross-repo contract: once one copy is reformatted the
+        # comparison stops being answerable, and the next real grammar change lands in a copy nobody
+        # can diff against the others.
+        #
+        # `swift test` also fails on a changed digest (`testTheFixtureMatchesItsPinnedContentHash`),
+        # which is what makes it fail on a developer's machine before it ever reaches CI. Both read
+        # the same sidecar file, so there is one digest to update and no way for the two to disagree.
+        #
+        # A red step here is not re-pinned to make it green. A grammar change starts at the Tracive
+        # API and lands in all four SDKs together.
+        run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/query-grammar-vectors.sha256
+
       - name: Build
         run: swift build -v
 
