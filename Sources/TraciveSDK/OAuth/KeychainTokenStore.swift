@@ -121,15 +121,12 @@ public final class KeychainTokenStore: TraciveTokenStore, @unchecked Sendable {
     }
   }
 
-  private func baseQuery() -> [String: Any] {
-    var query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: service,
-      kSecAttrAccount as String: account,
-    ]
-    if let accessGroup {
-      query[kSecAttrAccessGroup as String] = accessGroup
-    }
-    return query
+  /// Shared with `KeychainCacheKeyStore` so the two stores cannot drift apart — see
+  /// `KeychainItemQuery` for why that is not a theoretical concern.
+  ///
+  /// `internal` rather than `private` only so the test suite can assert on the query this store
+  /// actually uses. Asserting on a re-derived copy would be a check that cannot fail.
+  func baseQuery() -> [String: Any] {
+    KeychainItemQuery.base(service: service, account: account, accessGroup: accessGroup)
   }
 }

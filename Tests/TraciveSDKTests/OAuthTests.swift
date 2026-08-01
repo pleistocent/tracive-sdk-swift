@@ -1,3 +1,4 @@
+import Security
 import XCTest
 
 @testable import TraciveSDK
@@ -553,6 +554,54 @@ final class OAuthTests: XCTestCase {
     // §6 says best-effort. A sign-out that leaves a live token on the device because the network
     // was down is the worse of the two failures.
     XCTAssertNil(try store.load())
+  }
+
+  // MARK: - Keychain query shape
+  //
+  // These build a query dictionary and assert on it. They never call `SecItemAdd`, so the suite's
+  // "no network, no Keychain" claim still holds — which is the point: the attribute under test is
+  // one whose absence a real Keychain call would *not* report, because `SecItemAdd` succeeds either
+  // way and only the resulting protection differs.
+
+  func testKeychainQueryOptsMacOSIntoTheDataProtectionKeychain() {
+    let query = KeychainItemQuery.base(service: "svc", account: "acct", accessGroup: nil)
+
+    #if os(macOS)
+      // Without this key the item goes to the legacy file keychain, where the
+      // `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` that both stores set is ignored — so the
+      // ThisDeviceOnly guarantee SECURITY.md makes would not hold on a platform the package
+      // declares support for.
+      XCTAssertEqual(query[kSecUseDataProtectionKeychain as String] as? Bool, true)
+    #else
+      // iOS is always the data-protection keychain; setting the key there is meaningless.
+      XCTAssertNil(query[kSecUseDataProtectionKeychain as String])
+    #endif
+
+    XCTAssertEqual(query[kSecAttrService as String] as? String, "svc")
+    XCTAssertEqual(query[kSecAttrAccount as String] as? String, "acct")
+    XCTAssertNil(query[kSecAttrAccessGroup as String], "no access group was asked for")
+  }
+
+  /// The token store and the cache key store must produce identical queries for identical inputs.
+  /// They did not: only the cache key store set the data-protection flag, which left the *more*
+  /// sensitive item — the OAuth refresh token — as the unprotected one on macOS. Both now go
+  /// through one definition, and this asserts they still do.
+  func testBothKeychainStoresShareOneQueryDefinition() {
+    let fromShared = KeychainItemQuery.base(service: "s", account: "a", accessGroup: "group.test")
+
+    XCTAssertEqual(fromShared[kSecAttrAccessGroup as String] as? String, "group.test")
+    XCTAssertEqual(fromShared[kSecClass as String] as? String, kSecClassGenericPassword as String)
+
+    // Asserted against the queries the two stores *actually build* — constructing the stores does
+    // no Keychain I/O, and `baseQuery()` is a pure function. If either one reintroduces its own
+    // dictionary and drops an attribute, the key sets diverge and this goes red.
+    let tokenStoreKeys = Set(
+      KeychainTokenStore(clientId: "c", accessGroup: "group.test").baseQuery().keys)
+    let cacheKeyStoreKeys = Set(
+      KeychainCacheKeyStore(accessGroup: "group.test").baseQuery().keys)
+
+    XCTAssertEqual(tokenStoreKeys, cacheKeyStoreKeys, "the two Keychain stores build different queries")
+    XCTAssertEqual(tokenStoreKeys, Set(fromShared.keys))
   }
 
   func testSignOutWithoutAGrantSendsNothing() async throws {

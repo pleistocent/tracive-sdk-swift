@@ -178,21 +178,13 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
 
   // MARK: - Keychain plumbing
 
-  private func baseQuery() -> [String: Any] {
-    var query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: service,
-      kSecAttrAccount as String: account,
-    ]
-    if let accessGroup {
-      query[kSecAttrAccessGroup as String] = accessGroup
-    }
-    #if os(macOS)
-      // Opt macOS into the iOS-style data-protection keychain. Without it the item lands in the
-      // legacy file keychain, where `kSecAttrAccessible` is ignored and the user can be prompted.
-      query[kSecUseDataProtectionKeychain as String] = true
-    #endif
-    return query
+  /// Shared with `KeychainTokenStore` so the two stores cannot drift apart — see
+  /// `KeychainItemQuery` for why that is not a theoretical concern.
+  ///
+  /// `internal` rather than `private` only so the test suite can assert on the query this store
+  /// actually uses. Asserting on a re-derived copy would be a check that cannot fail.
+  func baseQuery() -> [String: Any] {
+    KeychainItemQuery.base(service: service, account: account, accessGroup: accessGroup)
   }
 
   private func readItem() throws -> Data? {
