@@ -312,6 +312,70 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(fetched.comments?.count, 1)
   }
 
+  /// `origin` is the second documented remedy for the trade-off above, so it has to be a remedy
+  /// that actually works — pinned here rather than left as prose in the README.
+  ///
+  /// The hazard is that `comments == nil` has two completely different meanings:
+  ///
+  /// - served from a minimal cache row → full detail was **never fetched**, and
+  /// - served from the server → full detail *was* fetched and there genuinely is none on file.
+  ///
+  /// A partner UI that renders "no incident reports on file" for the first case is showing a wrong
+  /// fraud answer about a real scammer. `origin` is the only thing in the payload that separates
+  /// them, so this test asserts the two cases are byte-identical *except* for `origin`.
+  func testOriginDistinguishesUnfetchedFullDetailFromGenuinelyEmptyFullDetail() async throws {
+    let clock = RecordingClock()
+    let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
+    // Every response is minimal-shaped, i.e. carries no comments and no chronologies. That is what
+    // a genuine "full detail, nothing on file" answer looks like on the wire.
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
+    let client = makeClient(transport: transport, clock: clock, cache: cache)
+
+    // Case 1: full detail really was requested of the server and came back empty.
+    let fromServer = try await client.checkScammer(
+      TestQueries.phone, source: .server, detail: .full, locale: "id")
+    XCTAssertNil(fromServer.comments)
+    XCTAssertNil(fromServer.topChronologies)
+    XCTAssertEqual(fromServer.origin, .server)
+
+    // Case 2: the same call on the default source is answered from the row case 1 just stored, so
+    // full detail was never asked for at all.
+    let fromCache = try await client.checkScammer(
+      TestQueries.phone, source: .cacheFirst, detail: .full, locale: "id")
+    XCTAssertNil(fromCache.comments)
+    XCTAssertNil(fromCache.topChronologies)
+    XCTAssertEqual(transport.callCount, 1, "the cache branch must not have gone to the network")
+
+    // The payloads agree on every field a caller would look at…
+    XCTAssertEqual(fromCache.riskTier, fromServer.riskTier)
+    XCTAssertEqual(fromCache.reportTotal, fromServer.reportTotal)
+    XCTAssertEqual(fromCache.credibleReports, fromServer.credibleReports)
+    // …so `origin` is the sole discriminator, and a caller that ignores it cannot tell "not
+    // fetched" from "none on file".
+    XCTAssertEqual(fromCache.origin, .cache)
+    XCTAssertNotEqual(fromCache.origin, fromServer.origin)
+  }
+
+  /// The `.cache` source has the same shape as `.cacheFirst` here and is easy to overlook, because
+  /// its documented contract ("a miss throws rather than answering empty") sounds like it already
+  /// protects against an empty answer. It does not: a *hit* on a minimal row is not a miss, so a
+  /// `.full` request is answered from it with the full-detail fields nil and nothing is thrown.
+  func testCacheOnlySourceAlsoAnswersFullDetailFromAMinimalRow() async throws {
+    let clock = RecordingClock()
+    let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
+    let client = makeClient(transport: transport, clock: clock, cache: cache)
+
+    _ = try await client.checkScammer(TestQueries.phone, source: .server, detail: .minimal)
+
+    let full = try await client.checkScammer(TestQueries.phone, source: .cache, detail: .full)
+
+    XCTAssertEqual(full.origin, .cache)
+    XCTAssertNil(full.comments)
+    XCTAssertNil(full.topChronologies)
+    XCTAssertEqual(transport.callCount, 1)
+  }
+
   func testServerFirstFallsBackToCacheOnTransportFailure() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)

@@ -184,13 +184,41 @@ try client.cache.clear()
 | `.serverFirst` | the server, falling back to the cache if the call fails |
 | `.cache` | cache only; a miss throws `TraciveError.cacheMiss` rather than answering empty |
 
+### A `.full` request can be answered from cache, with the full-detail fields empty
+
+Read this before you render `comments` or `topChronologies` to a user.
+
+The cache key is the query **alone** — not `(query, detail, locale)` — and full-detail content is
+never stored. So `checkScammer(query, detail: .full)` on the default `.cacheFirst` source will hit
+a previously stored minimal entry and return with `comments` and `topChronologies` both `nil`,
+having made no network call. **`nil` there means "not fetched", not "none on file."** A screen that
+renders "no incident reports" from that is showing a wrong fraud answer, not a stale one.
+
+Two ways to be right, and you need one of them:
+
+```swift
+// 1. Ask for the server explicitly whenever you need full detail.
+let result = try await client.checkScammer(query, source: .server, detail: .full)
+
+// 2. Or check the provenance before trusting the full-detail fields.
+let result = try await client.checkScammer(query, detail: .full)
+if result.origin == .server {
+  render(result.comments ?? [])        // trustworthy: nil really does mean none on file
+} else {
+  renderSummaryOnly(result)            // full detail was never fetched — do not imply it is empty
+}
+```
+
+`origin` is the mechanical discriminator, so this does not have to be handled by remembering a rule.
+
 Default TTLs: `HIGH` 30 days, `ELEVATED` 7 days, `CAUTION` 24 hours, `NONE` 1 hour. A `NONE` verdict
 is the one most likely to go stale — today's clean number is tomorrow's scammer — so it is held for
 the shortest time.
 
 What is stored: `SHA-256(searchQueryIndex)` as the row key, and an AES-GCM-sealed JSON payload. The
 raw phone number, email or account number is **never** written to disk. Neither is full-detail
-content (`topChronologies`, `comments`), nor `billing`, nor `checkId`.
+content (`topChronologies`, `comments`), nor `billing`, nor `checkId` — see the call-out above for
+what that means when you ask for `detail: .full`.
 
 Details, threat model and tuning: **[`Docs/caching.md`](Docs/caching.md)**.
 

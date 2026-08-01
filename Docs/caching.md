@@ -185,6 +185,31 @@ server-side check — and a cache hit is not one, which is why `checkId` is `nil
 **If a future version ever caches full detail, the key must become `(query, detail, locale)`.** That
 note is in the code as well, at `CheckResult.cacheableCopy()` and on the `CheckCache` protocol.
 
+### The consequence for `detail: .full`, which you must design around
+
+Because the key ignores `detail`, the read path ignores it too. `checkScammer(query, detail: .full)`
+on `.cacheFirst` — the **default** source — hits whatever row exists for that query and returns it
+as-is. If that row was stored by an earlier `.minimal` check, the caller gets `comments: nil` and
+`topChronologies: nil` and no network call is made.
+
+That `nil` is ambiguous by construction: it is identical to the shape you get when the server really
+did return full detail and there were no incidents and no comments. The SDK cannot narrow it for you
+without either caching full detail (which the key forbids) or adding a routing rule that the other
+Tracive SDKs do not have (which would break the 1:1 surface this contract exists to protect).
+
+So the caller must narrow it, and there are exactly two correct ways:
+
+1. **Pass `source: .server` whenever you need full detail.** The response still refreshes the cache,
+   so you lose nothing but the round trip you were always going to need.
+2. **Branch on `origin` before trusting the full-detail fields.** `origin == .server` is the only
+   condition under which `comments == nil` means "none on file". On `origin == .cache`, treat the
+   full-detail fields as *absent*, not as *empty*, and render a summary rather than an assertion.
+
+Getting this wrong produces a UI that tells a user "no incident reports on file" about an identifier
+with four of them. That is a wrong fraud answer, and it is silent — nothing throws and nothing logs.
+`ClientTests.testFullDetailRequestIsStillServedFromAMinimalCacheEntry` pins the behaviour, including
+that `origin` is a reliable discriminator.
+
 ---
 
 ## Configuration

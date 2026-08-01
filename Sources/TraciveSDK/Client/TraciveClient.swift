@@ -160,6 +160,14 @@ public actor TraciveClient {
   ///   - source: cache-versus-network strategy. `nil` uses `defaultSource`.
   ///   - detail: `.minimal` (default) or `.full`. `.full` adds `topChronologies` and `comments`,
   ///     needs a contractual rider server-side, and is **never** cached.
+  ///
+  ///     ⚠️ Because full detail is never cached *and* the cache key is the query alone, a `.full`
+  ///     request on a cache-reading source (`.cacheFirst` — the default — or `.cache`) can be
+  ///     answered from a stored minimal row, returning `comments` and `topChronologies` as `nil`
+  ///     with no network call. **That `nil` means "not fetched", not "none on file",** and the two
+  ///     are otherwise indistinguishable. Either pass `source: .server` when you need full detail,
+  ///     or check `result.origin == .server` before treating those fields as authoritative. See
+  ///     `Docs/caching.md`.
   ///   - locale: BCP-47. Only meaningful for `.full`; omitted from the request otherwise, because
   ///     `minimal` is always English and a stray field would change the payload behind an
   ///     `Idempotency-Key`.
