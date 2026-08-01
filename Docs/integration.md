@@ -147,15 +147,19 @@ Then route the callback — and **handle its result here too**, with the same `h
 ```swift
 // SwiftUI
 .onOpenURL { url in
-  Task { handle(await tracive.handleCallback(url: url)) }
+  Task { if let result = await tracive.handleCallback(url: url) { handle(result) } }
 }
 
 // UIKit
 func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
   guard let url = userActivity.webpageURL else { return }
-  Task { handle(await tracive.handleCallback(url: url)) }
+  Task { if let result = await tracive.handleCallback(url: url) { handle(result) } }
 }
 ```
+
+Route **every** incoming deep link through it. `nil` means "not mine" — the URL is not this client's
+redirect, or carries no OAuth parameter — and in that case the SDK has touched nothing, including an
+authorization the user is in the middle of. Anything non-`nil` is an outcome to handle.
 
 Handling it in both places is not belt and braces. Consent happens inside the Tracive app, so your
 app is backgrounded throughout and iOS may terminate it there. The SDK survives that — it persists

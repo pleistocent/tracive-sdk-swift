@@ -187,7 +187,7 @@ final class OAuthTests: XCTestCase {
 
     // A callback for the abandoned attempt must no longer satisfy the state check.
     let result = await oauth.handleCallback(url: Self.callback(code: "abc", state: first.state))
-    XCTAssertEqual(result.testDescription, "failed")
+    XCTAssertEqual(result?.testDescription, "failed")
     if case .failed(let error) = result {
       XCTAssertEqual(error.kind, .stateMismatch)
     }
@@ -477,7 +477,7 @@ final class OAuthTests: XCTestCase {
     let url = Self.callbackURL(["error": "access_denied", "state": request.state])
     let result = await oauth.handleCallback(url: url)
 
-    XCTAssertEqual(result.testDescription, "denied")
+    XCTAssertEqual(result?.testDescription, "denied")
   }
 
   func testOtherCallbackErrorsSurfaceTheRawCode() async throws {
@@ -742,7 +742,7 @@ final class OAuthTests: XCTestCase {
 
     let result = await oauth.handleCallback(url: Self.callback(code: "abc", state: request.state))
 
-    XCTAssertEqual(result.testDescription, "authorized")
+    XCTAssertEqual(result?.testDescription, "authorized")
   }
 
   // MARK: - Clearing the persisted attempt
@@ -757,7 +757,7 @@ final class OAuthTests: XCTestCase {
     // Success.
     try await withAttempt { oauth, store, request in
       let result = await oauth.handleCallback(url: Self.callback(code: "c", state: request.state))
-      XCTAssertEqual(result.testDescription, "authorized")
+      XCTAssertEqual(result?.testDescription, "authorized")
       XCTAssertNil(try store.loadPending(), "an authorized attempt stayed in the store")
     }
 
@@ -765,7 +765,7 @@ final class OAuthTests: XCTestCase {
     try await withAttempt { oauth, store, request in
       let url = Self.callbackURL(["error": "access_denied", "state": request.state])
       let result = await oauth.handleCallback(url: url)
-      XCTAssertEqual(result.testDescription, "denied")
+      XCTAssertEqual(result?.testDescription, "denied")
       XCTAssertNil(try store.loadPending(), "a denied attempt stayed in the store")
     }
 
@@ -773,7 +773,7 @@ final class OAuthTests: XCTestCase {
     try await withAttempt { oauth, store, request in
       let url = Self.callbackURL(["error": "invalid_scope", "state": request.state])
       let result = await oauth.handleCallback(url: url)
-      XCTAssertEqual(result.testDescription, "failed")
+      XCTAssertEqual(result?.testDescription, "failed")
       XCTAssertNil(try store.loadPending(), "a rejected attempt stayed in the store")
     }
 
@@ -781,7 +781,7 @@ final class OAuthTests: XCTestCase {
     try await withAttempt { oauth, store, request in
       let url = Self.callbackURL(["state": request.state])
       let result = await oauth.handleCallback(url: url)
-      XCTAssertEqual(result.testDescription, "failed")
+      XCTAssertEqual(result?.testDescription, "failed")
       XCTAssertNil(try store.loadPending(), "a malformed callback left the attempt in the store")
     }
 
@@ -816,7 +816,7 @@ final class OAuthTests: XCTestCase {
 
     let result = await oauth.handleCallback(url: Self.callback(code: "c", state: request.state))
 
-    XCTAssertEqual(result.testDescription, "failed")
+    XCTAssertEqual(result?.testDescription, "failed")
     XCTAssertNil(try store.loadPending())
   }
 
@@ -842,7 +842,7 @@ final class OAuthTests: XCTestCase {
     let url = Self.callback(code: "abc", state: request.state)
 
     let first = await oauth.handleCallback(url: url)
-    XCTAssertEqual(first.testDescription, "authorized")
+    XCTAssertEqual(first?.testDescription, "authorized")
 
     let afterRelaunch = makeOAuth(transport: transport, tokenStore: store)
     let replay = await afterRelaunch.handleCallback(url: url)
@@ -868,13 +868,110 @@ final class OAuthTests: XCTestCase {
     let request = try await oauth.makeAuthorizationRequest()
 
     let hostile = await oauth.handleCallback(url: Self.callback(code: "x", state: "not-our-state"))
-    XCTAssertEqual(hostile.testDescription, "failed")
+    XCTAssertEqual(hostile?.testDescription, "failed")
     XCTAssertNotNil(try store.loadPending(), "a stray redirect cancelled the user's own flow")
 
     // The genuine redirect, arriving afterwards, still completes.
     let real = await oauth.handleCallback(url: Self.callback(code: "abc", state: request.state))
-    XCTAssertEqual(real.testDescription, "authorized")
+    XCTAssertEqual(real?.testDescription, "authorized")
     XCTAssertNil(try store.loadPending())
+  }
+
+  // MARK: - Callback URL ownership
+
+  /// A URL that is not this client's redirect is not this client's business.
+  ///
+  /// Hosts are told to route *every* incoming deep link through `handleCallback(url:)`, and any app
+  /// on the device can open a URL at yours. Before the ownership check, a foreign URL fell through
+  /// to the `state` comparison, failed it, and **resumed the suspended `authorize()`** with
+  /// `.stateMismatch` — so one `open` from anywhere killed the consent the user was in the middle
+  /// of. The record survived, which is what made this so quiet: the flow was already dead and the
+  /// SDK reported nothing wrong.
+  ///
+  /// This test is written against `authorize()` rather than against `handleCallback` alone, because
+  /// the continuation is where the damage was. Asserting only the return value would have missed it.
+  func testAForeignURLCannotCancelTheConsentInProgress() async throws {
+    let launchGate = TestGate()
+    let launcher = GatedAppLauncher(openGate: launchGate)
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store, launcher: launcher)
+
+    let authorizeOutcome = TestResultBox<AuthResult>()
+    Task { authorizeOutcome.set(await oauth.authorize()) }
+    let launched = await waitUntil { launcher.openCallCount == 1 }
+    XCTAssertTrue(launched, "the launcher was never asked to open the authorize URL")
+
+    // Every one of these is refused outright: a different host, a different path, and a
+    // private-use scheme any app on the device could have declared.
+    for foreign in [
+      URL(string: "https://evil.example.com/tracive/callback?code=x&state=y")!,
+      URL(string: "https://partner.example.com/some/other/path?code=x&state=y")!,
+      URL(string: "partner-app://tracive/callback?code=x&state=y")!,
+    ] {
+      let outcome = await oauth.handleCallback(url: foreign)
+      XCTAssertNil(outcome, "\(foreign) was treated as this client's redirect")
+    }
+
+    // Nothing was touched: the record is intact and `authorize()` is still waiting.
+    XCTAssertNotNil(try store.loadPending(), "a foreign URL consumed the pending attempt")
+    XCTAssertFalse(authorizeOutcome.isSet, "a foreign URL resumed authorize() and killed the flow")
+
+    // And the genuine redirect still completes, through the same method.
+    await launchGate.open()
+    let state = try XCTUnwrap(Self.queryItems(of: try XCTUnwrap(launcher.lastOpenedURL))["state"])
+    let real = await oauth.handleCallback(url: Self.callback(code: "abc", state: state))
+    XCTAssertEqual(real?.testDescription, "authorized")
+
+    guard let settled = await authorizeOutcome.settled(within: 2) else {
+      return XCTFail("authorize() never returned")
+    }
+    XCTAssertEqual(settled.testDescription, "authorized")
+    XCTAssertNotNil(try store.load(), "the grant was not stored")
+  }
+
+  /// A URL on our own redirect that carries no OAuth parameter did not come from the authorization
+  /// server either — and it is the cheaper attack, because it needs no guessing beyond the redirect
+  /// itself. It is left alone for the same reason.
+  func testARedirectCarryingNoOAuthParameterIsLeftAlone() async throws {
+    let store = InMemoryTokenStore()
+    let oauth = makeOAuth(tokenStore: store)
+    _ = try await oauth.makeAuthorizationRequest()
+
+    for bare in [
+      URL(string: "https://partner.example.com/tracive/callback")!,
+      URL(string: "https://partner.example.com/tracive/callback?utm_source=push")!,
+    ] {
+      let outcome = await oauth.handleCallback(url: bare)
+      XCTAssertNil(outcome, "\(bare) was treated as an authorization redirect")
+    }
+    XCTAssertNotNil(try store.loadPending(), "a bare deep link consumed the pending attempt")
+  }
+
+  /// The comparison must not be so strict that it drops a real redirect, which would be the worse
+  /// failure: a user who consented successfully landing in a dead flow. Scheme and host are
+  /// case-insensitive under RFC 3986, and a trailing slash is something a browser adds and a
+  /// registration usually omits.
+  func testAGenuineRedirectSurvivesCaseAndTrailingSlashDifferences() async throws {
+    let variants = [
+      "https://PARTNER.example.com/tracive/callback",
+      "https://partner.example.com/tracive/callback/",
+    ]
+    for variant in variants {
+      let store = InMemoryTokenStore()
+      let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+      let oauth = makeOAuth(transport: transport, tokenStore: store)
+      let request = try await oauth.makeAuthorizationRequest()
+
+      var components = URLComponents(string: variant)!
+      components.queryItems = [
+        URLQueryItem(name: "code", value: "abc"),
+        URLQueryItem(name: "state", value: request.state),
+      ]
+      let outcome = await oauth.handleCallback(url: components.url!)
+
+      XCTAssertEqual(outcome?.testDescription, "authorized", "\(variant) was refused")
+    }
   }
 
   // MARK: - The record itself
@@ -960,7 +1057,7 @@ final class OAuthTests: XCTestCase {
     let request = try await oauth.makeAuthorizationRequest()
     let result = await oauth.handleCallback(url: Self.callback(code: "c", state: request.state))
 
-    XCTAssertEqual(result.testDescription, "authorized")
+    XCTAssertEqual(result?.testDescription, "authorized")
     XCTAssertNil(try store.loadPending(), "the default implementation must persist nothing")
   }
 
@@ -1268,7 +1365,7 @@ final class OAuthTests: XCTestCase {
     // The callback beats the launcher's completion.
     let state = try XCTUnwrap(Self.queryItems(of: try XCTUnwrap(launcher.lastOpenedURL))["state"])
     let callbackResult = await oauth.handleCallback(url: Self.callback(code: "abc", state: state))
-    XCTAssertEqual(callbackResult.testDescription, "authorized")
+    XCTAssertEqual(callbackResult?.testDescription, "authorized")
 
     await launchGate.open()
 
@@ -1460,7 +1557,9 @@ final class OAuthTests: XCTestCase {
     Task {
       let result = await oauth.handleCallback(
         url: Self.callback(code: "the-code", state: request.state))
-      callbackOutcome.set(result)
+      // `nil` means the SDK did not recognise its own redirect, which would be a different bug.
+      // Mapped to a value the assertion below cannot mistake for the outcome it expects.
+      callbackOutcome.set(result ?? .appNotInstalled)
     }
     let exchangeIsParked = await waitUntil { transport.count(pathSuffix: "/oauth/token") == 1 }
     XCTAssertTrue(exchangeIsParked, "the exchange never reached the transport")

@@ -402,8 +402,35 @@ public actor TraciveOAuth {
   /// The attempt is expired before anything is read from the URL, and the `state` check runs
   /// **before** the rest — including the `error` parameter: a callback whose state does not match
   /// ours is not ours, and reading its contents at all would be acting on an attacker-supplied URL.
+  ///
+  /// ## "Not mine" and "mine, and wrong" are different answers
+  ///
+  /// `nil` means the URL is not this client's redirect, or carries no OAuth parameter at all. In
+  /// that case **nothing is touched**: the pending attempt survives, no continuation is resumed, and
+  /// no result is manufactured. Every other case returns an `AuthResult`.
+  ///
+  /// The distinction is load-bearing rather than tidy. Hosts are told to route *every* incoming deep
+  /// link through here, and any app on the device can open a URL at yours — a private-use scheme is
+  /// one any other app may declare and fire, and a Universal Link's path can simply be typed. Before
+  /// this check, one such URL landing mid-consent fell straight through to the `state` comparison,
+  /// failed it, and resumed the suspended `authorize()` with `.stateMismatch`. The user would finish
+  /// consenting in the Tracive app, come back, and find the flow already given up — for the cost, to
+  /// whoever sent it, of a single `open`.
+  ///
+  /// - Returns: `nil` when the URL is not this client's redirect or carries none of `code`, `error`
+  ///   or `state`. Otherwise the outcome, which is also delivered to a suspended `authorize()`.
   @discardableResult
-  public func handleCallback(url: URL) async -> AuthResult {
+  public func handleCallback(url: URL) async -> AuthResult? {
+    // Ownership first, before anything is read from the URL and before any state is consulted.
+    guard Self.isOurRedirect(url, expecting: configuration.redirectUri) else { return nil }
+
+    let parameters = Self.queryParameters(of: url)
+    // A URL on our own redirect that carries no OAuth parameter did not come from the authorization
+    // server. That is the shape a stray link takes — and the shape an attacker would choose, since
+    // it needs no guessing: a bare redirect with nothing on it used to reach the `state` comparison
+    // and fail it, which was enough to cancel a consent in progress.
+    guard Self.oauthCallbackParameters.contains(where: { parameters[$0] != nil }) else { return nil }
+
     // In-memory first, store second. The store is only consulted when this process has no memory of
     // an attempt, which is exactly the post-termination case.
     guard let attempt = pending ?? storedPendingAuthorization() else {
@@ -428,8 +455,6 @@ public actor TraciveOAuth {
         )
       )
     }
-
-    let parameters = Self.queryParameters(of: url)
 
     guard let state = parameters["state"], traciveConstantTimeEquals(state, attempt.state) else {
       // The record is deliberately **not** cleared here, and this is the one terminal-looking
@@ -867,6 +892,41 @@ public actor TraciveOAuth {
     guard let continuation = pendingContinuation else { return }
     pendingContinuation = nil
     continuation.resume(returning: result)
+  }
+
+  /// The parameters an authorization redirect must carry at least one of.
+  ///
+  /// A URL on this client's own redirect carrying none of them did not come from the authorization
+  /// server, so it is left alone rather than allowed to resolve — or cancel — a pending attempt.
+  private static let oauthCallbackParameters = ["state", "code", "error"]
+
+  /// Whether `url` is addressed to this client's own redirect URI.
+  ///
+  /// Compared as everything before the query and the fragment — scheme, authority and path, which
+  /// are the parts a redirect registration fixes. Case-insensitively, because scheme and host are
+  /// case-insensitive under RFC 3986 §3.1 and §3.2.2, and with trailing slashes ignored, because a
+  /// browser adds one to a bare-authority URL and a registration usually does not carry it.
+  ///
+  /// `caseInsensitiveCompare` rather than `lowercased()` on purpose: it is the locale-independent
+  /// comparison, and a Turkish locale changes what `lowercased()` does to a dotted `I`.
+  ///
+  /// Erring towards accepting is deliberate. Being too permissive here costs nothing — `state` is
+  /// still compared afterwards, and that is what decides whether a code may be redeemed. Being too
+  /// restrictive would silently drop a genuine redirect, and a user who consented successfully would
+  /// land in a dead flow.
+  private static func isOurRedirect(_ url: URL, expecting redirectUri: URL) -> Bool {
+    redirectTarget(url).caseInsensitiveCompare(redirectTarget(redirectUri)) == .orderedSame
+  }
+
+  /// `scheme://authority/path`, with the query, the fragment and any trailing slashes removed.
+  ///
+  /// Taken off `absoluteString` rather than off `URLComponents`, so a private-use scheme with no
+  /// authority (`myapp:/callback`) and a Universal Link are measured the same way, and a URL that
+  /// `URLComponents` declines to parse is not silently treated as belonging to us.
+  private static func redirectTarget(_ url: URL) -> String {
+    var target = String(url.absoluteString.prefix { $0 != "#" && $0 != "?" })
+    while target.hasSuffix("/") { target.removeLast() }
+    return target
   }
 
   /// Reads the callback's query parameters.

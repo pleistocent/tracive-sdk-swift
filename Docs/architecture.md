@@ -172,6 +172,12 @@ Seven things the diagram is making visible on purpose:
    be replayed by a later process, and a `signOut()` cannot leave a live verifier behind. A `state`
    mismatch is the deliberate exception, for the reason the diagram notes: erasing there would let
    any app on the device cancel a consent in progress by sending one URL.
+8. **A URL that is not this client's redirect is refused before any of that runs**, and answers
+   `nil` rather than an `AuthResult`. Hosts are told to route every deep link through
+   `handleCallback(url:)`, so "not mine" has to be an answer the method can give — otherwise a
+   foreign URL reaches the `state` comparison, fails it, and resumes the suspended `authorize()`,
+   which is the same one-`open` cancellation that rule 7 exists to prevent, arriving one step
+   earlier.
 
 Two details omitted from the diagram to keep it readable. `authorize()` installs its continuation
 *before* it asks the OS to open the URL, so a callback that arrives during the launch cannot strand

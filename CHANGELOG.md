@@ -305,6 +305,26 @@ source compatibility until the API freezes at 1.0.
   code path ever used, so a partner copying the quick start would have been refused with
   `403 missing_scope`. (The old spelling is deliberately not repeated here: a test scans these
   documents for scope strings the SDK never requests, and it does not know prose from example.)
+- **`handleCallback(url:)` now checks the URL is its own redirect, and returns `AuthResult?`.** It
+  previously acted on whatever URL the host handed it. Hosts are told to route every incoming deep
+  link through it, and any app on the device can open a URL at yours — so a foreign URL arriving
+  mid-consent fell through to the `state` comparison, failed it, and **resumed the suspended
+  `authorize()`** with `.stateMismatch`. One `open` from anywhere was enough to kill a consent in
+  progress: the user would finish in the Tracive app, come back, and find the flow already given up,
+  with nothing anywhere reporting that anything had gone wrong. The pending record surviving the
+  mismatch — correct, and already the case — did not help, because the continuation was gone.
+
+  `nil` now means "not this client's redirect, or no OAuth parameter on it", and in that case
+  nothing is touched at all. The comparison is scheme, authority and path, case-insensitively and
+  ignoring trailing slashes, and it errs towards accepting: `state` is still compared afterwards and
+  is what decides whether a code may be redeemed, while a comparison that is too strict would drop a
+  genuine redirect and strand a user who consented successfully.
+
+  **Source-breaking** for every call site, mechanically so: `handle(await tracive.handleCallback(url:
+  url))` becomes `if let result = await tracive.handleCallback(url: url) { handle(result) }`. Proxy
+  mode is the one non-`nil` refusal — `.failed(.proxyModeNotImplemented)` — because that is a fact
+  about the client's configuration rather than about the URL. This is the shape the Kotlin SDK
+  already has.
 - **`TraciveClient.signOut()` now empties the result cache as well as the grant.** It previously
   cleared only the tokens and told the integrator, in four places, to call `cache.clear()` as a
   second step. That is documentation standing in for a safe default. The rows were fetched under the

@@ -353,8 +353,15 @@ public actor TraciveClient {
   /// is backgrounded for the whole of that visit — the SDK still completes the authorization from
   /// its persisted record, but the `await` on `authorize()` died with the old process and this
   /// return value is the only place the outcome appears.
+  ///
+  /// Route every incoming deep link through here. A URL that is not this client's redirect, or that
+  /// carries no OAuth parameter, answers `nil` and leaves everything untouched — including a consent
+  /// the user is in the middle of.
+  ///
+  /// Proxy mode is the one non-`nil` refusal: it answers `.failed(.proxyModeNotImplemented)` rather
+  /// than `nil`, because that is a fact about how this client was configured and not about the URL.
   @discardableResult
-  public func handleCallback(url: URL) async -> AuthResult {
+  public func handleCallback(url: URL) async -> AuthResult? {
     guard let oauth else {
       return .failed(.proxyModeNotImplemented)
     }

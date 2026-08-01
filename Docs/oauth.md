@@ -56,11 +56,15 @@ exchange. Never `UserDefaults`, never a file — the same rule as the tokens.
 func scene(_ scene: UIScene, continue activity: NSUserActivity) {
   guard let url = activity.webpageURL else { return }
   Task {
-    let result = await tracive.oauth?.handleCallback(url: url)
+    guard let result = await tracive.handleCallback(url: url) else { return }
     // Handle `result` here, not only where you called authorize().
   }
 }
 ```
+
+A `nil` there is not a failure: it means the URL was not this client's redirect, or carried no OAuth
+parameter, so the SDK left everything exactly as it was. Route every deep link through the method and
+ignore the `nil`s — see [Callback ownership](#callback-ownership) below.
 
 `authorize()` suspends until the callback arrives, and in the ordinary case its `await` returns the
 same value. But a continuation is a point in your *process's* stack: if the process was killed there
@@ -212,6 +216,24 @@ attack with no work required.
 
 Register the URI with Tracive exactly as your app will send it. Matching is exact: no trailing-slash
 tolerance, no prefix matching, no query-parameter tolerance.
+
+### Callback ownership
+
+`handleCallback(url:)` checks the URL is **its own redirect** before it acts on it, and answers
+`nil` when it is not — same for a URL on the right redirect that carries none of `code`, `error` or
+`state`. `nil` means nothing was touched: the pending attempt survives, no continuation is resumed,
+and no result is manufactured.
+
+That check is what makes "route every deep link through the SDK" safe advice. Any app on the device
+can open a URL at yours, and without it one such URL landing mid-consent reached the `state`
+comparison, failed it, and resumed the suspended `authorize()` with `.stateMismatch` — so a single
+`open` from anywhere killed a consent in progress, with nothing to indicate why. The user would
+finish consenting in the Tracive app, come back, and find the flow already given up.
+
+The comparison is scheme, authority and path — the parts a registration fixes — case-insensitively
+and ignoring trailing slashes. It errs towards accepting: being too permissive costs nothing, since
+`state` is still compared afterwards and that is what decides whether a code may be redeemed, while
+being too strict would drop a genuine redirect and strand a user who consented successfully.
 
 ## Public vs confidential clients
 
@@ -390,8 +412,9 @@ The whole flow is unit-testable with no server and no browser:
 - inject a fake `HTTPTransport` so `POST /oauth/token` returns whatever you want, including the 401
   and 402 paths;
 - call `handleCallback(url:)` directly with a hand-built redirect URL. Test the good path, a wrong
-  `state` (must give `.failed(.stateMismatch)`), a `?error=access_denied` (must give `.denied`), and
-  a URL with neither a code nor an error;
+  `state` (must give `.failed(.stateMismatch)`), a `?error=access_denied` (must give `.denied`), a
+  URL with neither a code nor an error, and a URL on somebody else's redirect (must give `nil`, and
+  must leave a pending attempt alone);
 - simulate a termination mid-consent by building **two** `TraciveOAuth` instances over **one**
   token store: start the attempt on the first, throw it away, and deliver the callback to the
   second. That is exactly what a relaunch is — the store survives, the process does not — and it
