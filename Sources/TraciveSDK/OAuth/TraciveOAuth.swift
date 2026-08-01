@@ -277,8 +277,17 @@ public actor TraciveOAuth {
     let raw = url.absoluteString
     // A malformed escape sequence makes `removingPercentEncoding` answer `nil`; whatever that is,
     // it is not blank, so falling back to the raw string is the safe reading.
-    let decoded = raw.removingPercentEncoding ?? raw
-    return decoded.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    return isBlank(raw.removingPercentEncoding ?? raw)
+  }
+
+  /// Whether a string carries nothing usable — empty, or nothing but whitespace.
+  ///
+  /// One definition of "blank" for the whole type, because the rules that turn on it are about
+  /// values that are *unusable* rather than values that are *absent*. A credential of three spaces
+  /// authenticates nobody and an install link of three spaces opens nothing, and in both cases an
+  /// emptiness test waves it through.
+  private static func isBlank(_ value: String) -> Bool {
+    value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
   // MARK: - State
@@ -607,11 +616,17 @@ public actor TraciveOAuth {
   ///
   /// The one condition it does check is a stored access token that is **blank**, which is not the
   /// same state as no grant at all. `TraciveTokens.accessToken` is a plain `String`, so a stored
-  /// record whose `access_token` is the empty string decodes perfectly cleanly to `""` — a partial
-  /// write, a Keychain save interrupted by a termination, or a restored backup can all leave one
-  /// behind. The refresh token sitting beside it is untouched, and a refresh token *is* the grant:
-  /// discarding it because a different field is empty throws away a credential that still works.
-  /// So a blank access token is refreshed rather than sent, and the fresh token is returned.
+  /// record whose `access_token` is `""` — or `"  "`, or a stray newline — decodes perfectly
+  /// cleanly: a partial write, a Keychain save interrupted by a termination, a restored backup, or
+  /// a hand-edited record can all leave one behind. The refresh token sitting beside it is
+  /// untouched, and a refresh token *is* the grant: discarding it because a different field is
+  /// damaged throws away a credential that still works. So a blank access token is refreshed rather
+  /// than sent, and the fresh token is returned.
+  ///
+  /// **Blank means whitespace-only, not merely empty**, and the difference is the whole of the bug
+  /// this rule used to have. `Authorization: Bearer    ` is exactly as unusable as `Bearer `, and
+  /// exactly as unrepairable once it is on the wire — but an emptiness test calls it a perfectly
+  /// good token and sends it. Kotlin has always tested for blankness here; this now matches it.
   ///
   /// The reactive 401 path cannot rescue this record, which is why the check is here rather than
   /// left to the server. `Bearer ` is not an expired token, it is a malformed one: the server
@@ -643,7 +658,7 @@ public actor TraciveOAuth {
   /// nothing was spent here that needs consuming. `clearStoredTokens()` and `signOut()` remain the
   /// ways a grant is dropped, both of them deliberate.
   ///
-  /// Ordinary calls pay one `isEmpty` for this and nothing else.
+  /// Ordinary calls pay one blank test for this and nothing else.
   ///
   /// The `async` belongs to the refresh. It costs external callers nothing: every call into an
   /// actor from outside it is already awaited, whatever effects the method itself declares.
@@ -656,11 +671,13 @@ public actor TraciveOAuth {
         )
       )
     }
-    guard tokens.accessToken.isEmpty else { return tokens.accessToken }
-    // The same test `refreshTokens(…)` applies, deliberately: an empty-string refresh token is as
-    // unrenewable as an absent one, and checking only for `nil` here would hand that record on to
-    // be reported as a revocation nobody performed.
-    guard let refreshToken = tokens.refreshToken, !refreshToken.isEmpty else {
+    guard Self.isBlank(tokens.accessToken) else { return tokens.accessToken }
+    // Blankness, not emptiness, on this field too. A whitespace-only refresh token is as
+    // unrenewable as an absent one, and it fails in the worse direction: an emptiness test would
+    // pass it on to be spent against the server, whose rejection clears the stored grant and
+    // reports `.grantRevoked` — a revocation nobody performed, for a record that was only ever
+    // damaged locally. Checking only for `nil` has the same fault one step earlier.
+    guard let refreshToken = tokens.refreshToken, !Self.isBlank(refreshToken) else {
       throw TraciveError.invalidToken(
         TraciveErrorInfo(
           code: "unusable_grant",

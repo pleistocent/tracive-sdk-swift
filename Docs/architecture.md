@@ -282,10 +282,15 @@ flowchart TD
 
 ### A blank access token is refreshed before anything is sent
 
-A stored grant can hold an empty access token beside a perfectly good refresh token.
+A stored grant can hold a blank access token beside a perfectly good refresh token.
 `TraciveTokens.accessToken` is a plain `String`, so a record whose `access_token` is `""` decodes as
 cleanly as any other — a partial write, a Keychain save interrupted by a termination, or a restored
 backup will all produce one.
+
+**Blank means whitespace-only as well as empty.** `Authorization: Bearer    ` is exactly as unusable
+as `Bearer `, and a rule written as "empty" waves it straight through — `"   ".isEmpty` is `false`.
+Kotlin has always tested blankness here, and this SDK now matches it, on the refresh token beside it
+as well as on the access token.
 
 Two things could be done with such a record, and both are wrong. Sending it puts `Bearer ` on the
 wire. Discarding it throws away the refresh token, which *is* the grant and is still live. So the
@@ -302,7 +307,7 @@ The renewal goes through the same `refreshTokens(…)` as the 401 path rather th
 it inherits the single-flight guarantee below: a blank token discovered while a refresh is already
 running joins that refresh instead of racing it.
 
-With no refresh token beside it — absent, or stored as an empty string — there is nothing to renew
+With no refresh token beside it — absent, or stored blank — there is nothing to renew
 with, and `accessToken()` answers that case itself instead of delegating: `.invalidToken` with the
 code `unusable_grant`, nothing sent, and the record left as it was found. It is terminal in the same
 way the `no_grant` guard is, and it stays terminal in the same way on every later call, because

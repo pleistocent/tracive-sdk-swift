@@ -1185,6 +1185,66 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(try store.load(), unusable)
   }
 
+  /// The same repair for a token that is **whitespace**, which is where the rule used to leak.
+  ///
+  /// `"   ".isEmpty` is `false`, so an emptiness test called three spaces a perfectly good
+  /// credential and put `Authorization: Bearer    ` on the wire. It is exactly as unusable as
+  /// `Bearer ` and exactly as unrepairable once sent: the server answers `invalid_token`, which
+  /// this SDK treats as terminal, so the damaged record never healed — it failed permanently, one
+  /// wasted round trip at a time, while a live refresh token sat beside it.
+  ///
+  /// Reachable the same ways the empty case is, plus one more: a value trimmed to nothing by
+  /// whatever wrote it. Kotlin has always tested blankness here.
+  func testAWhitespaceOnlyStoredAccessTokenIsRefreshedInsteadOfBeingSent() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.whitespaceDamagedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      request.url.path.hasSuffix("oauth/token")
+        ? .ok(json: Fixtures.refreshedTokenJSON)
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    let result = try await client.checkScammer(TestQueries.phone)
+
+    XCTAssertEqual(result.riskTier, .high)
+    // Renewed before the first send, so the check costs one round trip and not two.
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 1)
+    XCTAssertEqual(transport.requests.last?.header("Authorization"), "Bearer access-2")
+    Self.assertNoEmptyBearerReachedTheTransport(transport)
+    XCTAssertEqual(try store.load()?.accessToken, "access-2")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
+  }
+
+  /// Whitespace on both fields is terminal, and terminal without spending a request.
+  ///
+  /// The refresh token gets the same blank test for a sharper reason than symmetry. Sending
+  /// `refresh_token=%20%20` earns a rejection, and a rejected refresh clears the stored grant and
+  /// reports `.grantRevoked` — a revocation nobody performed, on a record that was only ever
+  /// damaged locally, sending whoever answers that alert to look for a server-side event that never
+  /// happened. `unusable_grant` is the honest answer and it costs nothing to reach.
+  func testAWhitespaceOnlyGrantFailsBeforeAnyNetworkIOAndKeepsTheRecord() async throws {
+    let unusable = TraciveTokens(
+      accessToken: "  ",
+      refreshToken: "\t\n ",
+      tokenType: "Bearer",
+      expiresAt: nil,
+      scopes: ["scammer.check", "credits.read"]
+    )
+    let store = InMemoryTokenStore(tokens: unusable)
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
+
+    XCTAssertEqual(error?.kind, .invalidToken)
+    XCTAssertEqual(error?.serverCode, "unusable_grant")
+    XCTAssertEqual(transport.callCount, 0)
+    Self.assertNoEmptyBearerReachedTheTransport(transport)
+    // Nothing was rejected, so nothing is erased: the record a partner is debugging is still there.
+    XCTAssertEqual(try store.load(), unusable)
+  }
+
   // MARK: - Concurrent identical checks
 
   /// A miss costs a credit just as a hit does, so the cache is a billing feature — and until the
@@ -1916,6 +1976,19 @@ enum Fixtures {
   /// a Keychain save interrupted by a termination, or a restored backup can leave behind.
   static let damagedTokens = TraciveTokens(
     accessToken: "",
+    refreshToken: "refresh-1",
+    tokenType: "Bearer",
+    expiresAt: nil,
+    scopes: ["scammer.check", "credits.read"]
+  )
+
+  /// The same damage one step subtler: an access token that is whitespace rather than empty.
+  ///
+  /// `"   ".isEmpty` is `false`, so a rule written as "empty" hands this straight to the transport
+  /// as `Authorization: Bearer    ` — which is as unusable as `Bearer ` and, being answered with
+  /// `invalid_token`, as terminal.
+  static let whitespaceDamagedTokens = TraciveTokens(
+    accessToken: "   ",
     refreshToken: "refresh-1",
     tokenType: "Bearer",
     expiresAt: nil,

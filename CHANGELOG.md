@@ -33,6 +33,24 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **A whitespace-only access token was not treated as damage, so `Authorization: Bearer    ` went
+  on the wire.** The repair that renews a damaged grant before the first request leaves was written
+  as an emptiness test, and `"   ".isEmpty` is `false`. Three spaces authenticate nobody and are
+  exactly as unrepairable once sent as `Bearer ` is: the server answers `invalid_token`, which this
+  SDK treats as terminal, so no refresh is attempted and the grant is discarded — while a perfectly
+  live refresh token sat beside it in the store the whole time. The record never healed; it failed
+  permanently, one wasted round trip at a time.
+
+  Blankness is now the test, on the refresh token in that same guard as well as on the access token,
+  which is what Kotlin has always done. The refresh token matters for a sharper reason than
+  symmetry: sending `refresh_token=%20%20` earns a rejection, and a rejected refresh clears the
+  stored grant and reports `.grantRevoked` — a revocation nobody performed, on a record that was
+  only ever damaged locally, sending whoever answers that alert to look for a server-side event that
+  never happened. It answers `.invalidToken` with `unusable_grant` and keeps the record instead.
+
+  This is one step past the empty-token case fixed earlier, and it survived that fix because the
+  rule was written as "empty" rather than as "blank".
+
 - **The result cache was unbounded by default, and nothing else bounded it either.**
   `CachePolicy.maxEntries` defaulted to `nil`, and the two mechanisms that look like they hold the
   file down do not: lazy expiry only touches rows that are read again, and the prune pass only
