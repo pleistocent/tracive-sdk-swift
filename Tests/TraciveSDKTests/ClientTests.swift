@@ -323,45 +323,63 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 2)
   }
 
-  func testFullDetailContentIsNeverCached() async throws {
+  /// What reaches disk is `cacheableCopy()`, never the response as it arrived.
+  ///
+  /// This used to be observed by issuing a `.full` request and reading the row back, which no longer
+  /// works for the best of reasons: a `.full` answer is not persisted at all now (see
+  /// `testAFullDetailAnswerIsNeverWrittenToTheCache`). So it is driven through the one detail
+  /// level that still writes. `checkId` and `billing` are on any real billed check, `.minimal`
+  /// included, and both must be dropped: a cache hit is neither a server-side check nor a charge, so
+  /// replaying either would report something that did not happen.
+  func testOnlyTheProjectionOfAResponseIsCachedNeverTheResponse() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
-    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.fullCheckJSON) }
+    let transport = FakeHTTPTransport { _, _ in
+      .ok(
+        json: #"""
+          {"checkId":"chk_min","found":true,"riskTier":"HIGH","reportTotal":12,
+           "credibleReports":9,"billing":{"creditSource":"USER","unitsCharged":1}}
+          """#)
+    }
     let client = makeClient(transport: transport, clock: clock, cache: cache)
 
-    let live = try await client.checkScammer(TestQueries.phone, detail: .full, locale: "id")
-    XCTAssertEqual(live.comments?.count, 1)
-    XCTAssertEqual(live.topChronologies?.count, 1)
+    let live = try await client.checkScammer(TestQueries.phone, detail: .minimal)
+    XCTAssertEqual(live.checkId, "chk_min")
     XCTAssertNotNil(live.billing)
-    XCTAssertEqual(live.checkId, "chk_full")
 
     let cached = try await client.checkScammer(TestQueries.phone, source: .cache)
-    // The key is the query alone, so anything that varies with detail/locale must not be stored —
-    // otherwise a later `minimal` request would be served `full` content.
+    XCTAssertNil(cached.checkId)
+    XCTAssertNil(cached.billing)
+    // …along with the two full-detail fields, which the projection nils unconditionally.
     XCTAssertNil(cached.comments)
     XCTAssertNil(cached.topChronologies)
-    XCTAssertNil(cached.billing)
-    XCTAssertNil(cached.checkId)
     // The invariant fields survive.
     XCTAssertEqual(cached.riskTier, live.riskTier)
     XCTAssertEqual(cached.reportTotal, live.reportTotal)
+    XCTAssertEqual(cached.credibleReports, live.credibleReports)
   }
 
-  func testFullDetailRequestIsStillServedFromAMinimalCacheEntry() async throws {
-    // Pins a trade-off that is deliberate but easy to trip over, so it cannot drift silently in any
-    // of the three SDKs.
+  func testFullDetailRequestBypassesTheCacheReadAndAsksTheServer() async throws {
+    // Pins the rule that resolves a trade-off this suite used to pin the other way, so record both
+    // sides — the old reasoning is why it is easy to get wrong again in any of the three SDKs.
     //
     // The cache key is `SHA-256(searchQueryIndex)` — the query **alone**, not
-    // `(query, detail, locale)`. A `.cacheFirst` request therefore hits on whatever was stored
-    // for that query regardless of the `detail` asked for, and since full-detail content is never
-    // cached, a `.full` request answered from cache comes back with `comments` and
-    // `topChronologies` nil. That is indistinguishable from "full detail returned nothing".
+    // `(query, detail, locale)` — and full-detail content is never stored. The earlier version of
+    // this test therefore asserted that a `.cacheFirst` request with `detail: .full` hit whatever
+    // minimal row existed and came back with `comments` and `topChronologies` nil, and it called
+    // that deliberate: the spec freezes the key as the query alone, so making `.full` route
+    // differently looked like inventing a fourth routing rule that Kotlin and Flutter did not have.
     //
-    // Callers who need full detail must pass `source: .server`. The alternative — making `.full`
-    // bypass the cache — is *not* implemented here on purpose: the spec freezes the key as the query
-    // alone and pins the remedy ("if a future version caches full detail, the key must become
-    // `(query, detail, locale)`"), so inventing a fourth routing rule in Swift would break the 1:1
-    // surface with Kotlin and Flutter.
+    // That reasoning weighed the wrong two things against each other. `nil` comments on a `.full`
+    // answer is not a caching subtlety — it is byte-identical to "the server answered in full and
+    // there are no incidents on file", which is a *wrong fraud answer* about an identifier that may
+    // have four of them, delivered silently, on the default source. Surface symmetry across the
+    // SDKs is worth less than that, and it costs nothing anyway: all three SDKs now carry this same
+    // rule, so the 1:1 surface is intact. Nothing public changed — no new source, no new parameter.
+    //
+    // The rule: **a cache row can never satisfy a full-detail request.** `.cacheFirst` skips the
+    // cache read and goes to the server; the response still writes the minimal projection back, so
+    // later `.minimal` requests are as free as they ever were.
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
     let transport = FakeHTTPTransport { _, index in
@@ -370,33 +388,36 @@ final class ClientTests: XCTestCase {
     let client = makeClient(transport: transport, clock: clock, cache: cache)
 
     _ = try await client.checkScammer(TestQueries.phone, source: .cacheFirst, detail: .minimal)
+    XCTAssertEqual(transport.callCount, 1)
+
+    // A fresh row for this exact query is now cached, and the `.full` request must ignore it.
     let full = try await client.checkScammer(
       TestQueries.phone, source: .cacheFirst, detail: .full, locale: "id")
 
-    XCTAssertEqual(full.origin, .cache)
-    XCTAssertNil(full.comments)
-    XCTAssertNil(full.topChronologies)
-    XCTAssertEqual(transport.callCount, 1)
+    XCTAssertEqual(full.origin, .server)
+    XCTAssertEqual(transport.callCount, 2, "the cached minimal row must not have answered `.full`")
+    // The narrative content is the whole point of `.full`: it must come from the server, not be
+    // nil because a stripped row was dressed up as a full answer.
+    XCTAssertEqual(full.comments?.count, 1)
+    XCTAssertEqual(full.topChronologies?.count, 1)
 
-    // …and `.server` is the documented way to actually get it.
-    let fetched = try await client.checkScammer(
-      TestQueries.phone, source: .server, detail: .full, locale: "id")
-    XCTAssertEqual(fetched.origin, .server)
-    XCTAssertEqual(fetched.comments?.count, 1)
+    // …and the minimal projection of that response is still written back, so the cache keeps
+    // working for the requests it can legitimately serve.
+    let minimal = try await client.checkScammer(
+      TestQueries.phone, source: .cacheFirst, detail: .minimal)
+    XCTAssertEqual(minimal.origin, .cache)
+    XCTAssertEqual(transport.callCount, 2)
   }
 
-  /// `origin` is the second documented remedy for the trade-off above, so it has to be a remedy
-  /// that actually works — pinned here rather than left as prose in the README.
+  /// With the cache read skipped for `.full`, `comments == nil` on a full-detail answer has exactly
+  /// one meaning again: the server was asked and there is nothing on file.
   ///
-  /// The hazard is that `comments == nil` has two completely different meanings:
-  ///
-  /// - served from a minimal cache row → full detail was **never fetched**, and
-  /// - served from the server → full detail *was* fetched and there genuinely is none on file.
-  ///
-  /// A partner UI that renders "no incident reports on file" for the first case is showing a wrong
-  /// fraud answer about a real scammer. `origin` is the only thing in the payload that separates
-  /// them, so this test asserts the two cases are byte-identical *except* for `origin`.
-  func testOriginDistinguishesUnfetchedFullDetailFromGenuinelyEmptyFullDetail() async throws {
+  /// This test used to prove the opposite — that `origin` was the *only* thing separating "never
+  /// fetched" from "none on file", because both shapes were reachable. Making `origin` a reliable
+  /// discriminator was a real remedy, but it was one the caller had to remember to apply, and the
+  /// failure mode for forgetting was a bank screen telling someone an active scammer is clean. The
+  /// ambiguity is now removed at the source instead of being made detectable.
+  func testFullDetailAnswersAlwaysComeFromTheServerSoNilMeansNoneOnFile() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
     // Every response is minimal-shaped, i.e. carries no comments and no chronologies. That is what
@@ -404,49 +425,143 @@ final class ClientTests: XCTestCase {
     let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
     let client = makeClient(transport: transport, clock: clock, cache: cache)
 
-    // Case 1: full detail really was requested of the server and came back empty.
     let fromServer = try await client.checkScammer(
       TestQueries.phone, source: .server, detail: .full, locale: "id")
     XCTAssertNil(fromServer.comments)
-    XCTAssertNil(fromServer.topChronologies)
     XCTAssertEqual(fromServer.origin, .server)
 
-    // Case 2: the same call on the default source is answered from the row case 1 just stored, so
-    // full detail was never asked for at all.
-    let fromCache = try await client.checkScammer(
-      TestQueries.phone, source: .cacheFirst, detail: .full, locale: "id")
-    XCTAssertNil(fromCache.comments)
-    XCTAssertNil(fromCache.topChronologies)
-    XCTAssertEqual(transport.callCount, 1, "the cache branch must not have gone to the network")
+    // The same call on the default source, with the row the first call just stored sitting in the
+    // cache. It must still reach the network, and it must still report `.server`.
+    let onDefaultSource = try await client.checkScammer(
+      TestQueries.phone, detail: .full, locale: "id")
+    XCTAssertEqual(onDefaultSource.origin, .server)
+    XCTAssertEqual(transport.callCount, 2)
+    XCTAssertNil(onDefaultSource.comments)
+    XCTAssertNil(onDefaultSource.topChronologies)
 
-    // The payloads agree on every field a caller would look at…
-    XCTAssertEqual(fromCache.riskTier, fromServer.riskTier)
-    XCTAssertEqual(fromCache.reportTotal, fromServer.reportTotal)
-    XCTAssertEqual(fromCache.credibleReports, fromServer.credibleReports)
-    // …so `origin` is the sole discriminator, and a caller that ignores it cannot tell "not
-    // fetched" from "none on file".
-    XCTAssertEqual(fromCache.origin, .cache)
-    XCTAssertNotEqual(fromCache.origin, fromServer.origin)
+    // No `.full` result can carry `origin == .cache`, so a caller who never inspects `origin` at
+    // all still cannot misread these fields.
+    XCTAssertNotEqual(onDefaultSource.origin, .cache)
   }
 
-  /// The `.cache` source has the same shape as `.cacheFirst` here and is easy to overlook, because
-  /// its documented contract ("a miss throws rather than answering empty") sounds like it already
-  /// protects against an empty answer. It does not: a *hit* on a minimal row is not a miss, so a
-  /// `.full` request is answered from it with the full-detail fields nil and nothing is thrown.
-  func testCacheOnlySourceAlsoAnswersFullDetailFromAMinimalRow() async throws {
+  /// `.cache` is easy to overlook here, because its documented contract ("a miss throws rather than
+  /// answering empty") sounds like it already protects against an empty answer. It did not: a *hit*
+  /// on a minimal row is not a miss, so a `.full` request was answered from it with the full-detail
+  /// fields nil and nothing was thrown.
+  ///
+  /// A cache row cannot satisfy a full-detail request, so for `.full` there is no such thing as a
+  /// hit — the answer is the same `.cacheMiss` the caller already handles, and never a stripped row
+  /// dressed up as a full answer. `.cache` still makes no network call, exactly as promised.
+  func testCacheOnlySourceRefusesAFullDetailRequestWithACacheMiss() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
     let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
     let client = makeClient(transport: transport, clock: clock, cache: cache)
 
     _ = try await client.checkScammer(TestQueries.phone, source: .server, detail: .minimal)
-
-    let full = try await client.checkScammer(TestQueries.phone, source: .cache, detail: .full)
-
-    XCTAssertEqual(full.origin, .cache)
-    XCTAssertNil(full.comments)
-    XCTAssertNil(full.topChronologies)
     XCTAssertEqual(transport.callCount, 1)
+
+    let error = await expectTraciveError {
+      try await client.checkScammer(TestQueries.phone, source: .cache, detail: .full)
+    }
+
+    XCTAssertEqual(error?.kind, .cacheMiss)
+    XCTAssertEqual(transport.callCount, 1, "`.cache` must still never call the network")
+
+    // The row is untouched: the same query at `.minimal` is still served from it.
+    let minimal = try await client.checkScammer(TestQueries.phone, source: .cache)
+    XCTAssertEqual(minimal.origin, .cache)
+  }
+
+  /// A full-detail answer must not be WRITTEN either, not merely skipped on read.
+  ///
+  /// The read gate and the write gate close different holes. `cacheableCopy()` keeps `tags` and
+  /// `disclaimer`, and both vary by locale, while `CheckCacheKey` is the query alone with no locale
+  /// in it. Only a `.full` request sends a `locale`, so storing its projection files locale-specific
+  /// text under a locale-less key — and a later `.minimal` caller, which sends no locale at all,
+  /// reads it back as though it were the default. `disclaimer` is the one string this SDK requires
+  /// every integrator to render, so the visible failure is a legal notice in the wrong language.
+  ///
+  /// Gating only the read cannot prevent that: the row is poisoned on the way IN, by the `.full`
+  /// call, and collected by a `.minimal` call that is reading the cache quite legitimately.
+  func testAFullDetailAnswerIsNeverWrittenToTheCache() async throws {
+    let clock = RecordingClock()
+    let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
+    // The full-detail response carries the Indonesian text, because that is what `locale: "id"`
+    // asks for; the later minimal response carries the default-locale text. Scripting both is what
+    // makes the wrong-language outcome observable rather than merely argued for.
+    let transport = FakeHTTPTransport { _, index in
+      index == 0
+        ? .ok(
+          json: #"""
+            {"found":true,"riskTier":"HIGH","reportTotal":12,"tags":["olshop-fiktif"],
+             "disclaimer":"Indikatif, bukan vonis hukum."}
+            """#)
+        : .ok(
+          json: #"""
+            {"found":true,"riskTier":"HIGH","reportTotal":12,"tags":["fake-shop"],
+             "disclaimer":"Indicative, not a legal ruling."}
+            """#)
+    }
+    let client = makeClient(transport: transport, clock: clock, cache: cache)
+
+    let full = try await client.checkScammer(
+      TestQueries.phone, source: .server, detail: .full, locale: "id")
+    XCTAssertEqual(full.disclaimer, "Indikatif, bukan vonis hukum.")
+    XCTAssertEqual(transport.callCount, 1)
+
+    // Nothing was stored, so a cache-only minimal read finds no row rather than a localized one.
+    let error = await expectTraciveError {
+      try await client.checkScammer(TestQueries.phone, source: .cache)
+    }
+    XCTAssertEqual(
+      error?.kind, .cacheMiss,
+      "a full-detail answer carries locale-dependent tags and disclaimer; storing it would serve "
+        + "them to a later minimal caller that asked for no locale")
+
+    // The failure this prevents, stated as an outcome: the minimal caller must get the server's
+    // default-locale text, never the Indonesian text a stored full-detail projection would supply.
+    // Without this assertion the test still passes if someone reinstates the write and merely
+    // strips one of the two fields, which would leave the same bug behind the other.
+    let minimal = try await client.checkScammer(TestQueries.phone, detail: .minimal)
+    XCTAssertEqual(minimal.disclaimer, "Indicative, not a legal ruling.")
+    XCTAssertEqual(minimal.tags, ["fake-shop"])
+    XCTAssertEqual(minimal.origin, .server)
+
+    // …and *that* answer is cached, because a response that sent no locale is one the locale-less
+    // key can safely hold. The cache is bypassed for full detail, not disabled by it.
+    let cached = try await client.checkScammer(TestQueries.phone, source: .cache)
+    XCTAssertEqual(cached.disclaimer, "Indicative, not a legal ruling.")
+    XCTAssertEqual(transport.callCount, 2)
+  }
+
+  /// `.serverFirst`'s fallback shares the defect the cache read had: falling back to a stored
+  /// minimal row on a network failure answers a `.full` request with `comments` nil, which reads as
+  /// "none on file". A degraded answer is acceptable for `.minimal` — the risk tier is the same
+  /// fact whether it is an hour old or fresh — but there is no degraded version of narrative
+  /// content, only a missing one that looks like an empty one. So `.full` surfaces the network
+  /// error and lets the caller decide.
+  func testServerFirstDoesNotFallBackToACachedRowForFullDetail() async throws {
+    let clock = RecordingClock()
+    let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
+    let transport = FakeHTTPTransport { _, index in
+      if index == 0 { return .ok(json: Fixtures.minimalCheckJSON) }
+      throw URLError(.notConnectedToInternet)
+    }
+    let client = makeClient(transport: transport, clock: clock, cache: cache)
+
+    _ = try await client.checkScammer(TestQueries.phone, source: .server, detail: .minimal)
+
+    let error = await expectTraciveError {
+      try await client.checkScammer(
+        TestQueries.phone, source: .serverFirst, detail: .full, locale: "id")
+    }
+    XCTAssertEqual(error?.kind, .network)
+
+    // The very same call at `.minimal` still degrades to the cache, so the fallback itself is
+    // intact — it is only full detail that refuses to be faked.
+    let degraded = try await client.checkScammer(TestQueries.phone, source: .serverFirst)
+    XCTAssertEqual(degraded.origin, .cache)
   }
 
   func testServerFirstFallsBackToCacheOnTransportFailure() async throws {

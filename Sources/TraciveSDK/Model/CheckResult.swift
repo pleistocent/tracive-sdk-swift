@@ -79,15 +79,21 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
 
   // MARK: - Derived helpers
 
-  /// The copy that is safe to persist.
+  /// The copy that is safe to persist — **provided the response it came from carried no `locale`**.
   ///
-  /// Caches **only** the fields that are invariant across `detail` and `locale`. `topChronologies`,
-  /// `comments` and `billing` vary with the request, and `checkId` identifies one specific
-  /// server-side check, so all four are dropped. `origin` is rewritten to `.cache` because that is
-  /// what the entry will be when it is read back.
+  /// `topChronologies`, `comments` and `billing` vary with the request, and `checkId` identifies one
+  /// specific server-side check, so all four are dropped. `origin` is rewritten to `.cache` because
+  /// that is what the entry will be when it is read back.
   ///
-  /// If a future version ever caches full-detail content, the cache key must become
-  /// `(query, detail, locale)` instead of `SHA-256(searchQueryIndex)` alone — otherwise a
+  /// What survives is invariant across `detail`, but **not** across `locale`: `tags` and
+  /// `disclaimer` are localized strings. The cache key is `SHA-256(searchQueryIndex)` with no locale
+  /// in it, so this projection is only safe to store for a response to a request that sent no
+  /// `locale` — which in practice means `detail: .minimal`. `TraciveClient` enforces that by not
+  /// writing full-detail responses at all; do not weaken it without first making the key
+  /// `(query, detail, locale)`. Storing a localized `disclaimer` under a locale-less key means the
+  /// next caller reads a legal notice in a language they did not ask for.
+  ///
+  /// The same key change is the precondition for ever caching full-detail *content*: otherwise a
   /// `minimal` request would serve `full` content and vice versa.
   public func cacheableCopy() -> CheckResult {
     CheckResult(

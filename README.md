@@ -179,39 +179,40 @@ result.origin  // .cache or .server
 try client.cache.clear()
 ```
 
-| Source | Behaviour |
-|---|---|
-| `.cacheFirst` | fresh cache entry if there is one, otherwise the server (default) |
-| `.server` | always the server; the response still refreshes the cache |
-| `.serverFirst` | the server, falling back to the cache if the call fails |
-| `.cache` | cache only; a miss throws `TraciveError.cacheMiss` rather than answering empty |
+| Source | Behaviour with `detail: .minimal` (default) | Behaviour with `detail: .full` |
+|---|---|---|
+| `.cacheFirst` | fresh cache entry if there is one, otherwise the server (default) | always the server; the cache read is skipped |
+| `.server` | always the server; the response still refreshes the cache | always the server; the response is **not** cached |
+| `.serverFirst` | the server, falling back to the cache if the call fails | always the server; a failure is raised, not degraded |
+| `.cache` | cache only; a miss throws `TraciveError.cacheMiss` rather than answering empty | always `TraciveError.cacheMiss`; still no network call |
 
-### A `.full` request can be answered from cache, with the full-detail fields empty
+### `detail: .full` does not use the cache at all — in either direction
 
-Read this before you render `comments` or `topChronologies` to a user.
+**It is never read.** Full-detail content is never stored, so serving a stored row to a `.full`
+caller would return `comments` and `topChronologies` as `nil` — indistinguishable from "the server
+answered in full and there are no incidents on file". A screen rendering "no incident reports" from
+that is showing a wrong fraud answer, not a stale one, so the SDK does not do it.
 
-The cache key is the query **alone** — not `(query, detail, locale)` — and full-detail content is
-never stored. So `checkScammer(query, detail: .full)` on the default `.cacheFirst` source will hit
-a previously stored minimal entry and return with `comments` and `topChronologies` both `nil`,
-having made no network call. **`nil` there means "not fetched", not "none on file."** A screen that
-renders "no incident reports" from that is showing a wrong fraud answer, not a stale one.
+**It is never written either**, for a separate reason worth knowing before you file a bug about it.
+The row key is the query alone, with no locale in it, and the stored projection keeps `tags` and
+`disclaimer`. Only a `.full` request sends a `locale`. Storing one would file locale-specific text
+under a locale-less key, and the next `.minimal` check — which sends no locale — would read it back
+as if it were the default: a legal disclaimer rendered in a language the user never asked for.
 
-Two ways to be right, and you need one of them:
+What that means for you:
 
 ```swift
-// 1. Ask for the server explicitly whenever you need full detail.
-let result = try await client.checkScammer(query, source: .server, detail: .full)
-
-// 2. Or check the provenance before trusting the full-detail fields.
+// `origin` is always `.server` here, so nil really does mean none on file.
 let result = try await client.checkScammer(query, detail: .full)
-if result.origin == .server {
-  render(result.comments ?? [])        // trustworthy: nil really does mean none on file
-} else {
-  renderSummaryOnly(result)            // full detail was never fetched — do not imply it is empty
-}
+render(result.comments ?? [])
 ```
 
-`origin` is the mechanical discriminator, so this does not have to be handled by remembering a rule.
+Three consequences worth planning for. A `.full` request is never free — budget a round trip and a
+credit for each one, and ask for `.minimal` when a risk tier is all you are going to render. A
+`.full` request also does not warm the cache, so a `.full` check followed by a `.minimal` check on
+the same query costs two credits, not one; if you want both, do the `.minimal` one first. And a
+`.full` request offline fails rather than degrading: catch it and fall back to `.minimal` yourself
+if a partial answer is better than none for your screen.
 
 Default TTLs: `HIGH` 30 days, `ELEVATED` 7 days, `CAUTION` 24 hours, `NONE` 1 hour. A `NONE` verdict
 is the one most likely to go stale — today's clean number is tomorrow's scammer — so it is held for
@@ -219,8 +220,8 @@ the shortest time.
 
 What is stored: `SHA-256(searchQueryIndex)` as the row key, and an AES-GCM-sealed JSON payload. The
 raw phone number, email or account number is **never** written to disk. Neither is full-detail
-content (`topChronologies`, `comments`), nor `billing`, nor `checkId` — see the call-out above for
-what that means when you ask for `detail: .full`.
+content (`topChronologies`, `comments`), nor `billing`, nor `checkId` — which is why the call-out
+above routes `detail: .full` past the cache entirely.
 
 Details, threat model and tuning: **[`Docs/caching.md`](Docs/caching.md)**.
 
@@ -291,7 +292,7 @@ Everything throws `TraciveError`. The interesting cases:
 | `.grantRevoked` | the whole grant is gone | tokens are already cleared; restart consent. **Do not retry** |
 | `.expiredToken` | refresh failed | restart consent |
 | `.missingScope` / `.detailNotPermitted` | 403 | your client is not entitled to that call |
-| `.cacheMiss` | `.cache` source, nothing fresh stored | go to the server |
+| `.cacheMiss` | `.cache` source with nothing fresh stored — or with `detail: .full`, which no row can answer | go to the server |
 | `.network(cause:)` | no HTTP response at all | offline; see the idempotency note above before retrying |
 | `.notImplemented` | Proxy mode, today | use OAuth mode |
 

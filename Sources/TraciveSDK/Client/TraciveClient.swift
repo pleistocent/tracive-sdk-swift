@@ -178,13 +178,13 @@ public actor TraciveClient {
   ///   - detail: `.minimal` (default) or `.full`. `.full` adds `topChronologies` and `comments`,
   ///     needs a contractual rider server-side, and is **never** cached.
   ///
-  ///     ⚠️ Because full detail is never cached *and* the cache key is the query alone, a `.full`
-  ///     request on a cache-reading source (`.cacheFirst` — the default — or `.cache`) can be
-  ///     answered from a stored minimal row, returning `comments` and `topChronologies` as `nil`
-  ///     with no network call. **That `nil` means "not fetched", not "none on file",** and the two
-  ///     are otherwise indistinguishable. Either pass `source: .server` when you need full detail,
-  ///     or check `result.origin == .server` before treating those fields as authoritative. See
-  ///     `Docs/caching.md`.
+  ///     A `.full` request neither reads nor writes the cache. `source` is interpreted accordingly:
+  ///     `.cacheFirst` skips the cache read and calls the server, `.cache` raises `.cacheMiss`, and
+  ///     `.serverFirst` surfaces the network error instead of falling back — and none of them
+  ///     stores the response, because it carries locale-dependent text that the locale-less row key
+  ///     cannot hold. The consequence for you: a `.full` result always has `origin == .server`, so
+  ///     `comments == nil` means "none on file" and nothing else, and a `.full` check never warms
+  ///     the cache for a later one. See `Docs/caching.md`.
   ///   - locale: BCP-47. Only meaningful for `.full`; omitted from the request otherwise, because
   ///     `minimal` is always English and a stray field would change the payload behind an
   ///     `Idempotency-Key`.
@@ -213,12 +213,41 @@ public actor TraciveClient {
     let resolvedSource = source ?? defaultSource
     let key = CheckCacheKey(query: query)
 
+    // A full-detail request neither reads nor writes the cache. One flag, gating both directions
+    // and the `.serverFirst` fallback, because the cache is wrong for `.full` in *both* directions
+    // — for two different reasons that each independently produce silently wrong content.
+    //
+    // **Reading is wrong because of `detail`.** `cacheableCopy()` strips `topChronologies` and
+    // `comments` on the way in, since the row key is the query alone. Stripping them is right.
+    // Serving the stripped row back to a `.full` caller is not: the caller receives
+    // `comments == nil`, which is byte-identical to "the server answered in full and there are no
+    // incidents on file". That is a wrong fraud answer about an identifier that may have four of
+    // them, and it is silent — nothing throws, nothing logs, and no request leaves the device.
+    //
+    // **Writing is wrong because of `locale`.** The same projection *keeps* `tags` and
+    // `disclaimer`, and `CheckCacheKey` is `SHA-256(searchQueryIndex)` with no locale in it. Only a
+    // `.full` request sends a `locale`, so storing its projection files locale-specific text under
+    // a locale-less key, and the next `.minimal` caller — which sends no locale at all — reads it
+    // back as if it were the default. `disclaimer` is the one string this SDK requires every
+    // integrator to render, so that surfaces a legal notice in a language the user did not ask for.
+    // Skipping only the read would not help: the poisoned row is written by the `.full` call and
+    // collected by a later `.minimal` call that is reading the cache quite legitimately.
+    //
+    // `.minimal` routing is untouched in every respect. Kotlin and Flutter carry the same joint
+    // rule, so the surface stays 1:1 across the three SDKs.
+    let cacheApplies = detail != .full
+
     switch resolvedSource {
     case .cache:
       // Deliberately the throwing read: this is the one mode that has to tell a miss from a
       // storage fault. A miss becomes `.cacheMiss`; a fault surfaces as itself, because answering
       // "no reports" when the truth is "the disk is broken" would be a fabricated clean verdict —
       // the single worst thing a fraud SDK can do.
+      //
+      // A `.full` request is the same situation viewed from the other side: this source is
+      // forbidden to call the network and the cache holds nothing that answers the question, so
+      // the honest reply is the miss the caller already handles. A stored row is not a hit here.
+      guard cacheApplies else { throw TraciveError.cacheMiss }
       let stored: CheckResult?
       do {
         stored = try cache.read(key)
@@ -229,24 +258,36 @@ public actor TraciveClient {
       return stored
 
     case .cacheFirst:
-      if let hit = cache.readIgnoringFailures(key) { return hit }
+      if cacheApplies, let hit = cache.readIgnoringFailures(key) { return hit }
       return try await fetchAndStore(
-        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
+        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
+        cacheApplies: cacheApplies)
 
     case .server:
       return try await fetchAndStore(
-        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
+        query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
+        cacheApplies: cacheApplies)
 
     case .serverFirst:
       do {
         return try await fetchAndStore(
-          query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key)
+          query, detail: detail, locale: locale, idempotencyKey: idempotencyKey, key: key,
+          cacheApplies: cacheApplies)
       } catch let error as TraciveError {
         // "Network first, fall back to cache when it fails" means a *transport-shaped*
         // failure — offline, 5xx, rate limited. A 402 or a 403 is a real answer about the caller's
         // account, and quietly serving a cached verdict instead would hide a billing or permission
         // problem until it became someone else's incident.
-        guard error.isTransient, let hit = cache.readIgnoringFailures(key) else { throw error }
+        //
+        // Full detail is excluded for a different reason. Falling back is a trade of freshness for
+        // an answer, and for `.minimal` that trade is sound — the risk tier is the same fact an
+        // hour later. There is no stale version of narrative content, only a missing one that
+        // renders as an empty one, so a `.full` request that fails on the network surfaces the
+        // failure and lets the caller decide whether to retry, degrade the UI, or ask for
+        // `.minimal` explicitly.
+        guard cacheApplies, error.isTransient, let hit = cache.readIgnoringFailures(key) else {
+          throw error
+        }
         return hit
       }
     }
@@ -356,12 +397,16 @@ public actor TraciveClient {
     "sdk-" + UUID().uuidString.lowercased()
   }
 
+  /// - Parameter cacheApplies: whether this response may be persisted. `false` for `detail: .full`,
+  ///   decided once in `checkScammer` and passed down rather than re-derived here, so the read side
+  ///   and the write side of the rule cannot drift apart.
   private func fetchAndStore(
     _ query: TraciveQuery,
     detail: Detail,
     locale: String?,
     idempotencyKey: String?,
-    key: CheckCacheKey
+    key: CheckCacheKey,
+    cacheApplies: Bool
   ) async throws -> CheckResult {
     let body = ScammerCheckRequestBody(query: query, detail: detail, locale: locale)
     let encoded: Data
@@ -408,10 +453,28 @@ public actor TraciveClient {
     // the TTL is measured on, rather than on whatever `CheckResult.init(from:)` defaulted to.
     let result = decoded.withOrigin(.server, fetchedAt: clock.now)
 
+    // A full-detail answer is never written — `cacheApplies` is `false` for it, decided once in
+    // `checkScammer` so the read gate and this write gate cannot drift apart.
+    //
+    // The reason here is *not* the one that governs the read. `cacheableCopy()` keeps `tags` and
+    // `disclaimer`, and the row key is `SHA-256(searchQueryIndex)` with no locale in it. Only a
+    // full-detail request carries a `locale`, so storing its projection would file a localized
+    // `disclaimer` under a locale-less key, and the next `.minimal` caller — which sends no locale
+    // at all — would read it straight back. `disclaimer` is the one string this SDK asks every
+    // integrator to put on screen, so the failure is a partner rendering a legal notice in the
+    // wrong language with nothing to indicate it.
+    //
+    // Do not "optimise" this back into an unconditional write: skipping the read does not prevent
+    // it, because the row is poisoned on the way IN and collected by a later `.minimal` call that
+    // is reading the cache quite legitimately. Relaxing either half requires the key to become
+    // (query, detail, locale) first.
+    //
     // The store persists `cacheableCopy()` itself, dropping checkId/billing/chronologies/comments.
     // A failed write must never fail a check that already succeeded — it costs one credit next
     // time, nothing more.
-    cache.writeIgnoringFailures(result, for: key)
+    if cacheApplies {
+      cache.writeIgnoringFailures(result, for: key)
+    }
 
     return result
   }

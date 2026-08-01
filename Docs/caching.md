@@ -178,6 +178,11 @@ The reason is the cache key. It is the query alone — not `(query, detail, loca
 `detail: .full, locale: "id"` response would later be served to a caller asking for `.minimal` in
 `en`. Only the fields that are invariant across `detail` and `locale` can be stored safely.
 
+Note what that rules out and what it does not. The projection is invariant across `detail`, but
+`tags` and `disclaimer` survive it and are **localized**, so the projection is not invariant across
+`locale`. That is why it is not enough to drop fields: a response that carried a `locale` must not
+be stored at all, which is exactly the rule the next section describes.
+
 `billing` is dropped for a second reason: a cache hit costs nothing, so replaying a stored `Billing`
 would report a charge that did not happen. Same for `checkId`, which identifies one specific
 server-side check — and a cache hit is not one, which is why `checkId` is `nil` on a hit.
@@ -185,30 +190,64 @@ server-side check — and a cache hit is not one, which is why `checkId` is `nil
 **If a future version ever caches full detail, the key must become `(query, detail, locale)`.** That
 note is in the code as well, at `CheckResult.cacheableCopy()` and on the `CheckCache` protocol.
 
-### The consequence for `detail: .full`, which you must design around
+### The consequence for `detail: .full`: the cache is bypassed in both directions
 
-Because the key ignores `detail`, the read path ignores it too. `checkScammer(query, detail: .full)`
-on `.cacheFirst` — the **default** source — hits whatever row exists for that query and returns it
-as-is. If that row was stored by an earlier `.minimal` check, the caller gets `comments: nil` and
-`topChronologies: nil` and no network call is made.
+`detail` is the one thing outside `source` that changes cache routing, and it does so on the way in
+*and* on the way out. A `.full` request never reads a row and never writes one:
 
-That `nil` is ambiguous by construction: it is identical to the shape you get when the server really
-did return full detail and there were no incidents and no comments. The SDK cannot narrow it for you
-without either caching full detail (which the key forbids) or adding a routing rule that the other
-Tracive SDKs do not have (which would break the 1:1 surface this contract exists to protect).
+| Source | `detail: .full` |
+|---|---|
+| `.cacheFirst` (default) | the cache read is skipped; the server is called; the response is not stored |
+| `.server` | the server, as always — but the response is not stored |
+| `.serverFirst` | the server; a transport failure is raised rather than falling back to a row |
+| `.cache` | `TraciveError.cacheMiss`, always — and still no network call |
 
-So the caller must narrow it, and there are exactly two correct ways:
+`.minimal` routing is untouched in every respect, and a `.minimal` response is stored exactly as
+before, so the cache keeps serving everything it can legitimately serve.
 
-1. **Pass `source: .server` whenever you need full detail.** The response still refreshes the cache,
-   so you lose nothing but the round trip you were always going to need.
-2. **Branch on `origin` before trusting the full-detail fields.** `origin == .server` is the only
-   condition under which `comments == nil` means "none on file". On `origin == .cache`, treat the
-   full-detail fields as *absent*, not as *empty*, and render a summary rather than an assertion.
+**Why the read is skipped.** Serving a stored row would hand the caller `comments: nil` and
+`topChronologies: nil` — byte-identical to the shape you get when the server really did return full
+detail and there were no incidents and no comments. A UI that renders "no incident reports on file"
+from that is telling a user an identifier with four reports is clean. That is a wrong fraud answer,
+not a stale one, and it is silent: nothing throws, nothing logs, and no request leaves the device.
 
-Getting this wrong produces a UI that tells a user "no incident reports on file" about an identifier
-with four of them. That is a wrong fraud answer, and it is silent — nothing throws and nothing logs.
-`ClientTests.testFullDetailRequestIsStillServedFromAMinimalCacheEntry` pins the behaviour, including
-that `origin` is a reliable discriminator.
+**Why the write is skipped, which is a different bug entirely.** `cacheableCopy()` drops the four
+volatile fields but *keeps* `tags` and `disclaimer` — and the row key has no locale in it, while a
+`.full` request is the only kind that sends a `locale`. Storing its projection therefore files
+locale-specific text under a locale-less key, and the very next `.minimal` check — which sends no
+locale at all — reads it straight back as though it were the default. `disclaimer` is the one string
+this SDK requires every integrator to put on screen, so the visible result is a legal notice in a
+language the user never asked for, with nothing in the payload to indicate it.
+
+The two halves are independent. Skipping only the read would leave the write bug fully intact: the
+row is poisoned on the way *in*, by the `.full` call, and collected later by a `.minimal` call that
+is reading the cache entirely legitimately. Relaxing either half requires the key to become
+`(query, detail, locale)` first.
+
+An earlier version of this SDK read the cache for `.full` requests, on the grounds that the key is
+frozen as the query alone and that a `detail`-dependent read would be a routing rule the sibling
+SDKs did not have. The freeze argument was sound about *storage* and never reached the read path —
+skipping a read stores nothing and invalidates nothing — and the symmetry argument resolved itself:
+all three SDKs carry this rule. Nothing in the public surface changed to get it: no new `Source`
+case, no new parameter, no signature change.
+
+Three things to design around, since they replace the old caveat:
+
+1. **A `.full` request is never free.** Every one is a round trip and a credit. Ask for `.minimal`
+   when a risk tier is all the screen renders, and reserve `.full` for the detail view.
+2. **A `.full` request does not warm the cache.** A `.full` check followed by a `.minimal` check on
+   the same query costs two credits, not one. If your screen needs both, issue the `.minimal` one
+   first — that one *is* stored, and it is the one a later cheap check can reuse.
+3. **A `.full` request offline fails rather than degrading.** `.serverFirst` will not substitute a
+   cached row. If a partial answer is better than none on your screen, catch the error and re-issue
+   the check at `.minimal` — that decision belongs to the caller, because only the caller knows
+   whether the UI can honestly say "detail unavailable".
+
+`ClientTests.testFullDetailRequestBypassesTheCacheReadAndAsksTheServer`,
+`testAFullDetailAnswerIsNeverWrittenToTheCache`,
+`testCacheOnlySourceRefusesAFullDetailRequestWithACacheMiss` and
+`testServerFirstDoesNotFallBackToACachedRowForFullDetail` pin all four branches and both
+directions.
 
 ---
 
@@ -270,6 +309,7 @@ network.
 | Keychain temporarily unavailable (locked device, entitlement problem) | the error **propagates**; rows are left alone, because a transient outage must not cost the user their whole cache |
 | Disk full, file corrupt | `CheckCacheError`; treat a write failure as non-fatal and a read failure as a miss |
 | `source: .cache` and nothing fresh stored | `TraciveError.cacheMiss` — never a silent empty result |
+| `source: .cache` with `detail: .full` | `TraciveError.cacheMiss`, whatever is stored — no row can answer a full-detail request |
 
 That last row is worth stating plainly: a cache miss is never dressed up as "no reports found". The
 difference between "we checked and found nothing" and "we did not check" is the difference between a

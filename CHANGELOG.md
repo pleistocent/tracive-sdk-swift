@@ -9,6 +9,33 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **`detail: .full` used the cache, and was wrong in both directions.** It now neither reads nor
+  writes it. Two independent defects, one rule.
+
+  *The read.* The cache stores only fields that do not vary with `detail`, so `comments` and
+  `topChronologies` are stripped on the way in — but the read path never consulted `detail`, so a
+  `.full` request on the default `.cacheFirst` source was served that stripped row with both fields
+  `nil` and no network call. `nil` there is byte-identical to "the server answered in full and there
+  are no incidents on file", so a partner screen would tell someone about to send money that an
+  identifier with four incident reports is clean. That is a wrong fraud answer, not a caching
+  subtlety: it is silent, it is on the default source, and the content it drops is exactly the
+  narrative a person reads before deciding.
+
+  *The write.* The stored projection keeps `tags` and `disclaimer`, and the row key carries no
+  locale — while a `.full` request is the only kind that sends one. Storing its projection filed
+  localized text under a locale-less key, and the next `.minimal` check, which sends no locale, read
+  it straight back as the default. `disclaimer` is the one string this SDK requires every integrator
+  to display, so the result was a legal notice rendered in a language the user never asked for.
+  Skipping only the read would not have helped: the row is poisoned on the way in, by the `.full`
+  call, and collected by a later `.minimal` call that reads the cache quite legitimately.
+
+  So `.cacheFirst` skips the read, `.cache` raises `.cacheMiss`, `.serverFirst` surfaces the network
+  error instead of degrading to a row, and none of them stores the response. `.minimal` routing is
+  untouched and nothing in the public surface changed. Three behaviours to plan for: a `.full`
+  request is never served free from cache; it no longer warms the cache, so `.full` then `.minimal`
+  on one query costs two credits rather than one; and a `.full` request offline now fails rather
+  than returning a partial answer that looks complete. `CheckResult.cacheableCopy()` documents the
+  locale constraint it cannot enforce itself. The Kotlin and Flutter SDKs carry the identical rule.
 - **The install link pointed at a host with no path.** `TraciveAppPresence.installURL(clientId:)`
   built `https://tracive.chottu.link` instead of `https://tracive.chottu.link/install`, so the one
   thing the SDK does for a user who does not have Tracive installed — open the download funnel and
@@ -70,11 +97,6 @@ source compatibility until the API freezes at 1.0.
   suppressing exactly the check that stops a future case carrying a thread-unsafe payload.
 - `checkScammer` always sends an `Idempotency-Key`, generated per call (prefixed `sdk-`) when the
   caller supplies none. Previously the header was absent unless the caller passed one.
-- Documentation now states that a `detail: .full` request on a cache-reading source can be answered
-  from a stored minimal row with `comments` and `topChronologies` `nil` — which means "not fetched",
-  not "none on file". Check `origin == .server`, or pass `source: .server`. The behaviour is
-  unchanged; it was undocumented, which on the default source is a wrong fraud answer waiting to
-  happen.
 - The documented OAuth scope is `scammer.check` everywhere, and the README quick start now also
   lists `credits.read`. The prose docs previously named a different, read-flavoured scope that no
   code path ever used, so a partner copying the quick start would have been refused with
