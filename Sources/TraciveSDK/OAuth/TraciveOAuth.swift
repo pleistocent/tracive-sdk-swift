@@ -684,8 +684,9 @@ public actor TraciveOAuth {
   /// worse failure of the two.
   ///
   /// Scope note: this clears the *grant*, not the check cache. `TraciveOAuth` does not own the
-  /// cache and cannot reach it. See `TraciveClient.signOut()` for why the caller must clear it
-  /// separately on a shared device.
+  /// cache and cannot reach it. `TraciveClient.signOut()` clears both, and is what an integrator
+  /// should normally call; this one is the escape hatch for dropping the grant while deliberately
+  /// keeping a warm cache.
   public func signOut() async {
     let tokens = storedTokens()
 

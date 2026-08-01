@@ -334,19 +334,21 @@ is an alert on a grant that really ended, not on one device's storage.
 await tracive.signOut()
 ```
 
-Calls `POST /oauth/revoke` best-effort, then clears local tokens **regardless of the outcome**. A
-user signing out on a plane still ends up signed out locally; the server-side token expires on its
-own within the hour.
+Calls `POST /oauth/revoke` best-effort, then clears local tokens **regardless of the outcome**, then
+empties the result cache. A user signing out on a plane still ends up signed out locally; the
+server-side token expires on its own within the hour.
 
-Clear the cache too:
+The cache goes with the grant because it holds which identifiers this user looked up, which is
+exactly the kind of thing the next person on the device should not inherit. A `clear()` that fails
+does not fail the sign-out — the tokens are already gone by then, and refusing to sign a user out
+because SQLite would not open is the worse of the two outcomes.
+
+`TraciveOAuth.signOut()` is the narrower call, for a host that wants to drop the grant and keep a
+warm cache on a device it knows is single-user:
 
 ```swift
-try? tracive.cache.clear()
+await tracive.oauth?.signOut()
 ```
-
-It is a separate call because it is a separate decision, but on a shared device you always want both:
-the cache holds which identifiers this user looked up, which is exactly the kind of thing the next
-person on the device should not inherit.
 
 ## Scopes
 

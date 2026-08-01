@@ -280,7 +280,7 @@ billed — reach for it only when you have a specific reason.
 ## Operations
 
 ```swift
-try client.cache.clear()                 // wipe everything (do this on sign-out)
+try client.cache.clear()                 // wipe everything (signOut() already does this)
 try client.cache.remove(query)           // drop one entry
 try client.cache.prune()                 // sweep expired rows now
 let stored = try client.cache.count()    // diagnostics

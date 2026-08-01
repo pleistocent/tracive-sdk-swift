@@ -287,13 +287,15 @@ Two rules worth putting in your own code review checklist:
 ## 9. Sign out
 
 ```swift
-await tracive.signOut()     // best-effort revoke, then local tokens are cleared regardless
-try? tracive.cache.clear()  // do this too — the cache is per-user data
+await tracive.signOut()     // best-effort revoke, then tokens and cached verdicts, regardless
 ```
 
 `signOut()` clears local tokens even if the revoke call fails, so a user on a plane still ends up
-signed out. Clearing the cache is a separate call because it is a separate decision; on a shared
-device you always want both.
+signed out. It empties the result cache in the same breath: those rows are the departing user's
+search history, and a failure to clear them is silent and lands on whoever picks the device up next.
+
+If you specifically want a warm cache to survive a re-login on a single-user device, call
+`await tracive.oauth?.signOut()` instead — that drops the grant and nothing else.
 
 ---
 
@@ -366,6 +368,6 @@ If you build queries from user input, test the folding: `+62 812-3456-7891`, `+6
 - [ ] `result.disclaimer` is displayed wherever the verdict is
 - [ ] 402 is handled; `credits()` is not called before each check
 - [ ] Retries — if you have any — pass an `Idempotency-Key`
-- [ ] `signOut()` also clears the cache
+- [ ] Sign-out goes through `client.signOut()`, which clears the cache as well as the grant
 - [ ] No `apiKey` anywhere in your integration. There is no parameter for one; if you found a way,
       you found a bug

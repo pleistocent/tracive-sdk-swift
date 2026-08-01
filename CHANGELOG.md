@@ -305,8 +305,25 @@ source compatibility until the API freezes at 1.0.
   code path ever used, so a partner copying the quick start would have been refused with
   `403 missing_scope`. (The old spelling is deliberately not repeated here: a test scans these
   documents for scope strings the SDK never requests, and it does not know prose from example.)
-- `signOut()` is documented as **not** clearing the check cache, with the shared-device consequence
-  spelled out, and `TraciveClient.init` is documented as doing blocking disk and Keychain I/O.
+- **`TraciveClient.signOut()` now empties the result cache as well as the grant.** It previously
+  cleared only the tokens and told the integrator, in four places, to call `cache.clear()` as a
+  second step. That is documentation standing in for a safe default. The rows were fetched under the
+  departing user's grant and are keyed by `SHA-256` of a phone number or an email address — a search
+  space small enough to brute-force offline — so anyone who missed the second call left the previous
+  user's search history readable on a shared device, with nothing to report it.
+
+  The argument against was that `cache` is injectable and could be shared by two clients, so
+  clearing here can empty rows another client put there. It loses on the shape of the two failures:
+  over-clearing costs re-billed checks, which is bounded and visible in the billing, while
+  under-clearing is a silent privacy leak on a device the SDK has no further contact with. Sharing
+  is also weaker than it looks — `CheckCacheKey` carries no user and no client id, so a shared store
+  is already serving one user's rows to another.
+
+  **Behavioural, and it is the point.** A caller who deliberately wants a warm cache to survive a
+  re-login on a single-user device should call `oauth?.signOut()`, which drops the grant and touches
+  nothing else. A failing `clear()` cannot fail the sign-out: the tokens are already gone by then.
+  Kotlin, Flutter and React Native clear on sign-out for the same reason.
+- `TraciveClient.init` is documented as doing blocking disk and Keychain I/O.
 - **A blank `installURL` override is now rejected at construction, and `TraciveOAuth.init` throws.**
   Three cases, shared by all four Tracive SDKs: `nil` (or the parameter omitted) selects the
   default install link exactly as before; a blank — whitespace-only — override throws `TraciveError`

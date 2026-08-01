@@ -361,22 +361,46 @@ public actor TraciveClient {
     return await oauth.handleCallback(url: url)
   }
 
-  /// Revokes the grant best-effort and clears local tokens regardless of the outcome.
+  /// Revokes the grant best-effort, clears local tokens regardless of the outcome, and **empties
+  /// the result cache**.
   ///
-  /// **This does not clear the cache.** The encrypted result store survives sign-out, and its rows
-  /// are keyed by `SHA-256` of a phone number or email address — a search space small enough to
-  /// brute-force offline — so on a shared device the next user could confirm which identifiers the
-  /// previous one looked up. Call `cache.clear()` too whenever the device may be shared:
+  /// The cache goes too, and that is not housekeeping. Its rows were fetched under the grant of the
+  /// user who just signed out, and they are keyed by `SHA-256` of a phone number or an email
+  /// address — a search space small enough to brute-force offline. Left in place, they let the next
+  /// person on the device confirm which identifiers the previous one looked up. That is the
+  /// departing user's search history, and sign-out is the moment they are entitled to expect it
+  /// gone.
   ///
-  /// ```swift
-  /// await client.signOut()
-  /// try? client.cache.clear()
-  /// ```
+  /// ## Why this is the client's business, given that a cache can be shared
   ///
-  /// Left as two calls deliberately: keeping a warm cache across a re-login on a single-user device
-  /// is a legitimate choice, and clearing it means paying for those checks again.
+  /// `cache` is injectable, so two clients can be handed the same store, and clearing here empties
+  /// rows the other one put there. That is the argument against, and it is a real one — it is why
+  /// this used to be left to the caller.
+  ///
+  /// It loses on the shape of the two failures. Over-clearing costs money: the surviving client
+  /// re-fetches and re-pays for checks it had already bought. That is bounded, visible in the
+  /// billing, and recoverable by simply not sharing one store between clients. Under-clearing costs
+  /// a privacy leak that nothing reports, on a device the SDK has no further contact with, for as
+  /// long as the rows live. A default that fails silently in the expensive direction is the wrong
+  /// default even when the loud one is occasionally wasteful.
+  ///
+  /// The sharing case is also weaker than it looks. `CheckCacheKey` carries no user and no client
+  /// id, so a store shared by two clients is *already* serving one user's rows to another — sharing
+  /// one is the thing that needs justifying, not clearing one. Give each client its own store if you
+  /// want independent lifetimes.
+  ///
+  /// A caller who deliberately wants a warm cache to survive a re-login on a single-user device can
+  /// keep the rows by not routing that flow through `signOut()` — call `oauth?.signOut()` directly,
+  /// which drops the grant and touches nothing else.
+  ///
+  /// A failing `clear()` cannot fail the sign-out. The tokens are already gone by then, and refusing
+  /// to sign a user out because SQLite would not open would be the worse of the two outcomes; the
+  /// rows remain subject to `CachePolicy` expiry either way.
+  ///
+  /// Kotlin, Flutter and React Native clear on sign-out for the same reason.
   public func signOut() async {
     await oauth?.signOut()
+    try? cache.clear()
   }
 
   /// Whether a grant is stored. Not a liveness check — the server may have revoked it since.

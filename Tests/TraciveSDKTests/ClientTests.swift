@@ -629,6 +629,57 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(error?.kind, .cacheMiss)
   }
 
+  /// Sign-out takes the verdicts with it, not only the tokens.
+  ///
+  /// The rows were fetched under the departing user's grant and are keyed by `SHA-256` of a phone
+  /// number or an email address — a search space small enough to brute-force offline. Leaving them
+  /// behind lets the next person on the device confirm which identifiers the previous one looked
+  /// up, and nothing about that failure is visible from inside the app.
+  ///
+  /// Asserted through a `.cache` read as well as through `count()`, because the property that
+  /// matters is that the data is no longer *readable*, not that a counter reached zero.
+  func testSignOutEmptiesTheResultCache() async throws {
+    let clock = RecordingClock()
+    let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
+    let transport = FakeHTTPTransport { request, _ in
+      request.url.path.hasSuffix("oauth/revoke")
+        ? HTTPResponse(status: 200)
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, clock: clock, cache: cache)
+
+    _ = try await client.checkScammer(TestQueries.phone, source: .server)
+    XCTAssertEqual(try cache.count(), 1, "the check should have been cached in the first place")
+
+    await client.signOut()
+
+    XCTAssertEqual(try cache.count(), 0, "the departing user's verdicts survived sign-out")
+    let error = await expectTraciveError {
+      try await client.checkScammer(TestQueries.phone, source: .cache)
+    }
+    XCTAssertEqual(error?.kind, .cacheMiss)
+  }
+
+  /// A store that cannot be emptied must not keep a user signed in.
+  ///
+  /// `clear()` throws, and the tokens are already gone by the time it runs, so a propagating failure
+  /// would report a sign-out that half happened. The rows stay subject to `CachePolicy` expiry.
+  func testSignOutStillDropsTheGrantWhenTheCacheCannotBeCleared() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, _ in HTTPResponse(status: 200) }
+    let client = makeClient(
+      transport: transport,
+      cache: UnclearableCheckCache(),
+      tokenStore: store
+    )
+
+    await client.signOut()
+
+    XCTAssertNil(try store.load(), "a failing cache clear blocked the sign-out")
+    let authorized = await client.isAuthorized
+    XCTAssertFalse(authorized)
+  }
+
   func testDisabledCachePolicyNeverServesAHit() async throws {
     let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
     let client = makeClient(transport: transport, cache: NoOpCheckCache())
@@ -1231,6 +1282,29 @@ extension HTTPResponse {
     guard let data, let text = String(data: data, encoding: .utf8) else { return "\"\"" }
     return String(text.dropFirst().dropLast())
   }
+}
+
+/// A cache whose `clear()` always throws — a locked database file, a full disk, a store the app no
+/// longer has permission to write. Everything else behaves like `NoOpCheckCache`.
+final class UnclearableCheckCache: CheckCache {
+
+  struct Failure: Error {}
+
+  let policy: CachePolicy
+
+  init(policy: CachePolicy = .default) {
+    self.policy = policy
+  }
+
+  func read(_ key: CheckCacheKey) throws -> CheckResult? { nil }
+  func write(_ result: CheckResult, for key: CheckCacheKey) throws {}
+  func remove(_ key: CheckCacheKey) throws {}
+  func clear() throws { throw Failure() }
+
+  @discardableResult
+  func prune() throws -> Int { 0 }
+
+  func count() throws -> Int { 0 }
 }
 
 /// A `TraciveClock` you move by hand, which also records every backoff it was asked to wait.
