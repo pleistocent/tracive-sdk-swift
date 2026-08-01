@@ -157,6 +157,37 @@ local will tell you.
 
 ---
 
+## How it works
+
+`TraciveClient` is the only type most integrations touch. It owns four collaborators: the query
+builder that validates and folds an identifier before anything leaves the device, the encrypted
+local cache, the OAuth driver, and the HTTP transport that every byte of traffic goes through.
+
+```mermaid
+flowchart LR
+  APP["Your iOS app"] --> C["TraciveClient"]
+  C --> Q["TraciveQuery"]
+  C --> K["CheckCache"]
+  C --> O["TraciveOAuth"]
+  C --> T["HTTPTransport"]
+  O -->|"Universal Link, no WebView"| TA["Tracive app"]
+  T -->|"Bearer access token"| API["Tracive API"]
+  TA -->|"consent and token issue"| API
+  C -.->|"Proxy mode, phase 2"| BE["Your own backend"]
+  BE -.-> API
+```
+
+Consent is an app-to-app handoff: the SDK checks that Tracive is installed, then opens the authorize
+URL as a Universal Link that the Tracive app claims, and the redirect comes back to your app. A
+check is validated locally, answered from the cache when it can be, and only then sent to the
+server.
+
+The full diagram set — the consent sequence, the single-flight token refresh, the cache routing
+rules, and the folding grammar per identifier type — is in
+**[`Docs/architecture.md`](Docs/architecture.md)**.
+
+---
+
 ## Queries
 
 Six builders. Each one folds the input into the canonical `searchQueryIndex` that the server keys
@@ -355,6 +386,7 @@ release still reaches you intact.
 
 | | |
 |---|---|
+| [`Docs/architecture.md`](Docs/architecture.md) | the diagram set: components, consent, tokens, cache routing, folding |
 | [`Docs/integration.md`](Docs/integration.md) | wiring it into an app, end to end |
 | [`Docs/oauth.md`](Docs/oauth.md) | the consent flow, PKCE, token refresh, sign-out |
 | [`Docs/caching.md`](Docs/caching.md) | storage format, encryption, TTLs, threat model |
