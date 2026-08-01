@@ -556,7 +556,7 @@ public actor TraciveOAuth {
   /// send the user through `authorize()`.
   ///
   /// This deliberately does **not** refresh pre-emptively on a locally-computed expiry. The SDK puts
-  /// refresh on the 401 `expired_token` response, and the server's clock is the one that decides:
+  /// refresh on the server's 401, and the server's clock is the one that decides:
   /// refreshing off a device clock that has drifted forward would burn a refresh-token rotation
   /// (and edge the grant closer to reuse detection) for nothing.
   ///

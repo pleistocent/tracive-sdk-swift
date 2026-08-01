@@ -268,7 +268,8 @@ is the easier one to migrate later.
 ### Expiry is handled reactively, and only reactively
 
 The SDK never refreshes ahead of the deadline. It sends the stored access token, and refreshes when
-the server answers `401 expired_token`.
+the server answers **401** — any 401 except the two terminal ones, not only an exact `expired_token`
+body. See [Which 401s refresh](#which-401s-refresh).
 
 `TraciveTokens.isExpired(at:)` is available if you want to read the stored expiry yourself — to
 pre-warm a session before a burst of checks, say — but **the SDK does not consult it**, and acting on
@@ -318,9 +319,35 @@ round trip at a time. The client-side check is the only thing that can recover i
 `TraciveOAuth.accessToken()` is `async` for this reason. Nothing changes at your call site: it is a
 method on an `actor`, so every call from outside was already `await`ed.
 
+### Which 401s refresh
+
+**Any 401 except two.** The SDK does not require the body to carry `code: "expired_token"`, and it
+never did require anything of the body beyond those two exclusions being absent:
+
+| Response | What happens |
+|---|---|
+| `401` with no body at all | refresh, then replay |
+| `401` with an unrecognised code | refresh, then replay |
+| `401 expired_token` | refresh, then replay |
+| `401 invalid_token` | terminal — surfaced as `.invalidToken` |
+| `401 grant_revoked` | terminal — tokens cleared, surfaced as `.grantRevoked` |
+
+A bare `401 Unauthorized` with no JSON body is what CDNs, API gateways and misconfigured reverse
+proxies emit, and this SDK is designed to sit behind a partner gateway in phase 2. Requiring an exact
+code meant that in that state the SDK **never refreshed at all**: every call failed identically, for
+as long as the app ran, until something happened to call `authorize()` again.
+
+The two exclusions are the same case at one remove. The server is not saying the credential is stale,
+it is saying it is not a credential — so a fresh one earns nothing, and asking for one only spends a
+refresh-token rotation.
+
+At most one refresh is attempted per request either way, and the replay carries the same
+`Idempotency-Key` as the first attempt, so a check that was somehow billed before the 401 was emitted
+can be collapsed server-side rather than charged twice.
+
 ### Refresh is single-flight
 
-On a `401 expired_token` the SDK refreshes and replays the request. Concurrent 401s trigger
+On a refreshable 401 the SDK refreshes and replays the request. Concurrent 401s trigger
 **exactly one** refresh; the others wait for its result.
 
 This is not an optimisation. The refresh token rotates, so two simultaneous refreshes send the same
@@ -420,6 +447,6 @@ The whole flow is unit-testable with no server and no browser:
   second. That is exactly what a relaunch is — the store survives, the process does not — and it
   must still reach `.authorized`. Advance an injected clock past ten minutes for the expiry case;
 - for the single-flight property, fire several requests concurrently against a transport that returns
-  `401 expired_token` and assert that `POST /oauth/token` was hit **exactly once**. That assertion is
+  `401` and assert that `POST /oauth/token` was hit **exactly once**. That assertion is
   the one worth writing: it is the failure that would otherwise show up as random sign-outs in
   production and be nearly impossible to reproduce.

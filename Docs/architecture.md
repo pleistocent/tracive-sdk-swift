@@ -191,7 +191,7 @@ refuses to store the grant it just obtained.
 ## 3. Token lifecycle
 
 The SDK does **not** refresh pre-emptively on a locally computed expiry. Refresh is driven by the
-server's `401 expired_token`, because the server's clock is the one that decides; refreshing off a
+server answering **401**, because the server's clock is the one that decides; refreshing off a
 device clock that has drifted forward would burn a refresh-token rotation for nothing — and each
 surplus rotation is another chance to present a retired token to reuse detection.
 
@@ -251,8 +251,8 @@ flowchart TD
   TR -->|"no"| NE
   B -->|"got an HTTP response"| S401
   S401 -->|"code grant_revoked"| GR
-  S401 -->|"code expired_token, first time only"| RF
-  S401 -->|"any other 401"| ST
+  S401 -->|"code invalid_token"| ST
+  S401 -->|"any other 401, first time only"| RF
   S401 -->|"not 401"| ST
   ST -->|"yes"| RET
   RET -->|"yes"| W2
@@ -353,7 +353,7 @@ already on the wire arrives whatever the task's cancellation state.
 
 They are different budgets. The replay after a successful refresh re-sends the identical request and
 does **not** consume a retry attempt — it is a re-authentication, not a retry of a failed check. Only
-one refresh is attempted per request; a second `expired_token` falls through and surfaces.
+one refresh is attempted per request; a second 401 falls through and surfaces.
 
 The retry loop, by contrast, is governed by `RetryPolicy` and by `isRetryable`, which is `true` for
 `GET /v1/credits` and `GET /v1/profile` — no side effects, so nothing to double-charge — and for a

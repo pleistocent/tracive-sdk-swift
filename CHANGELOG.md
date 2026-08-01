@@ -305,6 +305,27 @@ source compatibility until the API freezes at 1.0.
   code path ever used, so a partner copying the quick start would have been refused with
   `403 missing_scope`. (The old spelling is deliberately not repeated here: a test scans these
   documents for scope strings the SDK never requests, and it does not know prose from example.)
+- **The token refresh now fires on any non-terminal 401, not only on an exact `expired_token` body.**
+  The old condition required the response to carry precisely `code: "expired_token"`. A bare
+  `401 Unauthorized` — no body, or a `WWW-Authenticate` header and nothing else — is what CDNs, API
+  gateways and misconfigured reverse proxies emit, and this SDK is explicitly designed to sit behind
+  a partner gateway in phase 2. In that state it never refreshed at all: every call failed
+  identically, for as long as the app ran, until something happened to call `authorize()` again. Not
+  a degraded path, a permanently stuck client.
+
+  `grant_revoked` and `invalid_token` stay terminal, for the same reason at one remove: the server is
+  not saying the credential is stale, it is saying it is not a credential, so a fresh one earns
+  nothing. Everything that made the old branch safe is unchanged — at most one refresh per request,
+  and the replay does not consume the retry budget.
+
+  Widening this is only safe because every check already carries an `Idempotency-Key`, generated per
+  call when the caller supplies none. The refresh-then-replay path is now reached by many more
+  responses than before, and each of them has to be collapsible server-side. **If the SDK did not
+  attach that key unconditionally, this change would turn a rare double-charge risk into a routine
+  one** — which is exactly what it did in a sibling SDK that widened the trigger first. A test now
+  pins the key across the bare-401 replay specifically.
+
+  All four Tracive SDKs are standardising on this trigger.
 - **`handleCallback(url:)` now checks the URL is its own redirect, and returns `AuthResult?`.** It
   previously acted on whatever URL the host handed it. Hosts are told to route every incoming deep
   link through it, and any app on the device can open a URL at yours — so a foreign URL arriving

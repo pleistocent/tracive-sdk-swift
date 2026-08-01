@@ -935,11 +935,105 @@ final class ClientTests: XCTestCase {
 
     let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
 
-    // Auto-refresh is on `expired_token` specifically. A malformed or foreign token is not
-    // going to be fixed by rotating ours.
+    // `invalid_token` is one of the two terminal 401s. The server is not saying the credential is
+    // stale, it is saying it is not a credential — malformed, foreign, structurally rejected — and
+    // rotating ours does not make it ours. Everything else on a 401 now refreshes; this does not.
     XCTAssertEqual(error?.kind, .invalidToken)
     XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 0)
     XCTAssertNotNil(try store.load())
+  }
+
+  /// A bare `401` with no body at all must still drive a refresh.
+  ///
+  /// This is what CDNs, API gateways and misconfigured reverse proxies emit, and the SDK is designed
+  /// to sit behind a partner gateway in phase 2. Requiring the body to carry exactly `expired_token`
+  /// left the client **permanently** stuck in that state: it never refreshed, so every call failed
+  /// identically for as long as the app ran, until something happened to call `authorize()` again.
+  func testABare401WithNoBodyStillRefreshesAndReplays() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("oauth/token") {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return request.header("Authorization") == "Bearer access-1"
+        ? HTTPResponse(status: 401)
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    let result = try await client.checkScammer(TestQueries.phone)
+
+    XCTAssertEqual(result.riskTier, .high)
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+    XCTAssertEqual(transport.requests.last?.header("Authorization"), "Bearer access-2")
+    XCTAssertEqual(try store.load()?.accessToken, "access-2")
+  }
+
+  /// A 401 carrying a code this SDK has never heard of is treated the same way. An error code added
+  /// to the server after this version shipped must not be the thing that strands the client.
+  func testA401WithAnUnrecognisedCodeRefreshesAndReplays() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("oauth/token") {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return request.header("Authorization") == "Bearer access-1"
+        ? .error(status: 401, code: "token_not_active_yet")
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    _ = try await client.checkScammer(TestQueries.phone)
+
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
+  }
+
+  /// The replay after a bare 401 carries the **same** `Idempotency-Key` as the first attempt.
+  ///
+  /// This is the property that makes widening the trigger safe rather than merely convenient. The
+  /// refresh-then-resend path is now reached by many more responses than before, so every one of
+  /// them has to be collapsible server-side — otherwise a check billed before the 401 was emitted
+  /// would be billed twice, silently, with no way for the caller to detect it.
+  func testTheReplayAfterABare401ReusesTheFirstAttemptsIdempotencyKey() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("oauth/token") {
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return request.header("Authorization") == "Bearer access-1"
+        ? HTTPResponse(status: 401)
+        : .ok(json: Fixtures.minimalCheckJSON)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    _ = try await client.checkScammer(TestQueries.phone)
+
+    let keys = transport.requests
+      .filter { $0.url.path.hasSuffix("scammer-checks") }
+      .map { $0.header("Idempotency-Key") }
+    XCTAssertEqual(keys.count, 2)
+    XCTAssertNotNil(keys[0])
+    XCTAssertEqual(keys[0], keys[1], "the replay must be collapsible into the first attempt")
+  }
+
+  /// Widening the trigger must not widen the loop. A server answering a bare 401 forever refreshes
+  /// once and then surfaces, exactly as it did for `expired_token`.
+  func testABare401StillRefreshesAtMostOncePerRequest() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      request.url.path.hasSuffix("oauth/token")
+        ? .ok(json: Fixtures.refreshedTokenJSON)
+        : HTTPResponse(status: 401)
+    }
+    let client = makeClient(transport: transport, tokenStore: store)
+
+    let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
+
+    XCTAssertNotNil(error)
+    XCTAssertEqual(transport.count(pathSuffix: "oauth/token"), 1)
+    XCTAssertEqual(transport.count(pathSuffix: "scammer-checks"), 2)
   }
 
   func testARefreshIsAttemptedAtMostOncePerRequest() async throws {

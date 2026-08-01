@@ -42,8 +42,8 @@ public struct TraciveTokens: Codable, Equatable, Hashable, Sendable, CustomStrin
   /// want to read — pre-warming a session before a burst of checks, or showing the state of a
   /// connection in a settings screen. It is not a hook the SDK acts on.
   ///
-  /// What the SDK does instead is send the stored access token and, on the server's
-  /// `401 expired_token`, refresh once and replay the request. The reason is whose clock the
+  /// What the SDK does instead is send the stored access token and, on the server's **401**,
+  /// refresh once and replay the request. The reason is whose clock the
   /// question is asked against. `expiresAt` is measured by the *device's* clock, which the SDK
   /// neither controls nor can correct: a device running a few minutes fast reports every token
   /// expired early, and a device that is hours out reports them expired the moment they are issued.

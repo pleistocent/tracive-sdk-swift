@@ -555,6 +555,19 @@ public actor TraciveClient {
 
       if response.status == 401 {
         let info = TraciveResponseMapper.errorInfo(from: response.body)
+        // Refresh on **any 401 that is not terminal**, rather than on an exact `expired_token` body.
+        //
+        // The old condition required the response to carry precisely `code: "expired_token"`. A
+        // bare `401 Unauthorized` — no body at all, or a `WWW-Authenticate` header and nothing else
+        // — is what CDNs, API gateways and misconfigured reverse proxies emit, and this SDK is
+        // explicitly designed to sit behind a partner gateway in phase 2; the proxy contract exists
+        // for that. In that state the SDK never refreshed at all: every call failed identically,
+        // for as long as the app ran, until something happened to call `authorize()` again. Not a
+        // degraded path — a permanently stuck client.
+        //
+        // Two codes stay terminal, for the same reason at one remove: the server is not saying the
+        // credential is stale, it is saying it is not a credential, so obtaining a fresh one earns
+        // nothing.
         switch info.code {
         case "grant_revoked":
           // Usually the server's refresh-token reuse detection firing. The grant is gone; keeping
@@ -562,20 +575,23 @@ public actor TraciveClient {
           await oauth.clearStoredTokens()
           throw TraciveError.grantRevoked(info)
 
-        case "expired_token" where !didRefresh:
+        case "invalid_token":
+          // Malformed, foreign, or structurally rejected. Rotating ours does not make it ours.
+          break
+
+        default:
+          guard !didRefresh else { break }
           didRefresh = true
           // Single-flight: concurrent 401s funnel into one `POST /oauth/token`. Getting this wrong
           // trips the server's reuse detection, which revokes the whole grant.
           _ = try await oauth.refreshTokens(staleAccessToken: token)
           // Re-send the identical request. It carries an `Idempotency-Key` — `fetchAndStore`
           // attaches one even when the caller did not — so if the first attempt was billed after
-          // all, the server can collapse the two into a single charge. This replay deliberately
-          // does not consume the retry budget: it is a re-authentication, not a retry of a failed
-          // check.
+          // all, the server can collapse the two into a single charge. That property is what makes
+          // widening this branch safe: the replay is now reached by many more responses than
+          // before, and every one of them is collapsible. This replay deliberately does not consume
+          // the retry budget: it is a re-authentication, not a retry of a failed check.
           continue
-
-        default:
-          break
         }
       }
 
