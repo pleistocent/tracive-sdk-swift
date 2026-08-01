@@ -263,7 +263,7 @@ let client = TraciveClient(
     cautionTtl: 24 * 60 * 60,
     noneTtl: 60 * 60,
     honorsServerTtlOverride: true,   // leave this on
-    maxEntries: 5_000                // nil = unbounded
+    maxEntries: 5_000                // the default; nil = unbounded
   )
 )
 ```
@@ -271,6 +271,13 @@ let client = TraciveClient(
 `maxEntries` evicts the rows **closest to expiring**, not the least recently used. LRU would mean a
 write on every cache hit, which turns the cheap path into the expensive one; "dies soonest" needs no
 extra bookkeeping and drops the entries whose re-fetch was imminent anyway.
+
+**It defaults to 5 000 rather than to unbounded**, matching the Flutter SDK. Neither of the two
+mechanisms that would otherwise hold the file down actually bounds it: lazy expiry only touches rows
+that are read again, and the prune pass only deletes rows that have already expired. A `HIGH`
+verdict lives for thirty days, so a screen that checks a fresh identifier on every render
+accumulates a month of them, on a phone, with nothing to stop it and nothing to report it. Passing
+`nil` restores the old behaviour if you genuinely want it.
 
 `CachePolicy.disabled` turns the cache off entirely. Every check then goes to the server and is
 billed — reach for it only when you have a specific reason.

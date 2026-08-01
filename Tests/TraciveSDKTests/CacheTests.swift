@@ -570,6 +570,41 @@ final class CacheTests: XCTestCase {
     XCTAssertNotNil(try cache.read(high))
   }
 
+  /// A store built with **no policy argument at all** — the shape every integrator gets — stops
+  /// growing at 5 000 rows.
+  ///
+  /// The cap has always been honoured; what was missing was a default that engaged it. With
+  /// `maxEntries: nil` neither of the two mechanisms that look like they bound this file actually
+  /// does: lazy expiry only reaches rows that are queried again, and the prune pass only deletes
+  /// rows that have already expired. A `HIGH` verdict is held for thirty days, so a screen checking
+  /// a fresh identifier on every render accumulates a month of them with nothing to stop it.
+  ///
+  /// The boundary is written as `capacity + 1` rather than as a round number so that off-by-one
+  /// eviction — dropping at the cap instead of past it — fails here.
+  func testTheDefaultPolicyStopsTheStoreGrowingPastItsCap() throws {
+    let capacity = try XCTUnwrap(
+      CachePolicy.default.maxEntries,
+      "the default policy carries no cap at all, so the store grows without bound"
+    )
+    let clock = TestClock(CacheTests.t0)
+    let cache = try SQLiteCheckCache.inMemory(now: clock.provider)
+
+    for index in 0...capacity {
+      // Keys built straight from a folded index, because 5 001 valid E.164 numbers would be a
+      // fixture rather than a test. The store only ever sees the digest.
+      try cache.write(
+        makeResult(tier: .high),
+        for: CheckCacheKey(searchQueryIndex: "PHONE_+62800000\(index)")
+      )
+    }
+
+    XCTAssertEqual(
+      try cache.count(), capacity,
+      "the default policy must bound the store; an unbounded default grows for as long as the app "
+        + "is installed"
+    )
+  }
+
   func testClearEmptiesTheStore() throws {
     let clock = TestClock(CacheTests.t0)
     let cache = try SQLiteCheckCache.inMemory(now: clock.provider)

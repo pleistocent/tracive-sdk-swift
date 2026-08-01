@@ -18,8 +18,21 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
   /// server's fleet-wide invalidation lever. Turning it off pins clients to local defaults and
   /// makes a bad cached verdict un-revocable.
   public var honorsServerTtlOverride: Bool
-  /// Optional cap on stored rows; `nil` means unbounded (lazy expiry plus the prune-on-open pass
-  /// keeps it in check).
+  /// Cap on stored rows. Enforced after every write and by the prune pass; `nil` means unbounded.
+  ///
+  /// **The default is 5 000, and an unbounded default would be the wrong one.** This is an
+  /// encrypted database on someone's phone, and the two mechanisms that used to be relied on to
+  /// hold it down do not: lazy expiry only touches rows that are read again, and the prune-on-open
+  /// pass only deletes rows that are already expired. A `HIGH` verdict is held for thirty days, so
+  /// a screen that checks a fresh identifier on every render can accumulate a month of them with
+  /// nothing to stop it. Growth like that is silent — no error, no warning, just a file that gets
+  /// bigger — and the device it lands on is one this SDK has no further contact with.
+  ///
+  /// The number matches the Flutter SDK, so both bound the same store at the same size.
+  ///
+  /// Eviction takes the rows **closest to expiring** first, because those have the least value
+  /// left: a row about to die was going to be re-fetched shortly anyway. Not LRU, which would mean
+  /// a write on every cache hit and turn the cheap path into the expensive one.
   public var maxEntries: Int?
 
   public init(
@@ -29,7 +42,7 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
     cautionTtl: TimeInterval = 24 * 60 * 60,
     noneTtl: TimeInterval = 60 * 60,
     honorsServerTtlOverride: Bool = true,
-    maxEntries: Int? = nil
+    maxEntries: Int? = 5_000
   ) {
     self.isEnabled = isEnabled
     self.highTtl = highTtl

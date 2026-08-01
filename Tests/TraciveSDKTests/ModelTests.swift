@@ -240,6 +240,19 @@ final class ModelTests: XCTestCase {
     XCTAssertTrue(policy.honorsServerTtlOverride)
   }
 
+  /// The default cap, pinned against a literal.
+  ///
+  /// It used to be `nil`. Nothing else bounds the file: lazy expiry only touches rows that are read
+  /// again, and the prune pass only removes rows that have already expired, so a `HIGH` verdict's
+  /// thirty days is thirty days of unbounded growth on someone's phone. The Flutter SDK bounds the
+  /// same store at the same number, and asserting the literal rather than `CachePolicy().maxEntries`
+  /// is what makes a change to it show up here instead of comparing a symbol with itself.
+  func testTheDefaultPolicyBoundsTheStore() {
+    XCTAssertEqual(CachePolicy.default.maxEntries, 5_000)
+    XCTAssertEqual(CachePolicy.disabled.maxEntries, 5_000)
+    XCTAssertNil(CachePolicy(maxEntries: nil).maxEntries, "unbounded stays available on request")
+  }
+
   func testServerTtlOverridesThePerTierDefault() {
     let policy = CachePolicy.default
     XCTAssertEqual(policy.effectiveTtl(for: .high, serverTtlSeconds: 120), 120)

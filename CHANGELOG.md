@@ -33,6 +33,23 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **The result cache was unbounded by default, and nothing else bounded it either.**
+  `CachePolicy.maxEntries` defaulted to `nil`, and the two mechanisms that look like they hold the
+  file down do not: lazy expiry only touches rows that are read again, and the prune pass only
+  deletes rows that have already expired. A `HIGH` verdict is held for thirty days, so an app that
+  checks a fresh identifier on every render accumulates a month of them — an encrypted SQLite file
+  growing on a user's phone, with no error, no warning, and no further contact from this SDK.
+
+  The default is now 5 000 rows, matching the Flutter SDK so both bound the same store at the same
+  size. `SQLiteCheckCache` already honoured a non-`nil` cap on every write and in every prune, so
+  nothing about the eviction itself changed: it takes the rows **closest to expiring** first,
+  because those have the least value left, and it is deliberately not LRU — tracking last-read
+  would mean a write on every cache hit and turn the cheap path into the expensive one.
+
+  **This is a behaviour change for anyone relying on the old default.** A store that has grown past
+  5 000 rows will evict down to it on the next write or prune, and each evicted row costs one credit
+  the next time that identifier is checked. Pass `maxEntries: nil` to keep the previous behaviour.
+
 - **Two overlapping checks of the same identifier were two requests and two charges.** The cache is
   a billing feature — a miss costs exactly what a hit costs — but the cache write is the only
   serialisation point in the check flow, and it happens after both requests have already left the
