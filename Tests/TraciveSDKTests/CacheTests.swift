@@ -1,4 +1,5 @@
 import CryptoKit
+import Security
 import Foundation
 import XCTest
 
@@ -733,6 +734,91 @@ final class CacheTests: XCTestCase {
     XCTAssertNotNil(try cache.read(query), "and it must be served again afterwards")
   }
 
+  // MARK: - Data-key recovery
+  //
+  // These drive `KeychainCacheKeyStore` through an injected item store, so they exercise the real
+  // recovery logic without touching the Keychain — which an unsigned `swift test` binary cannot do,
+  // and which is why this type previously had no coverage at all.
+
+  /// A stored key that can no longer produce a usable AES key must be replaced, not thrown on
+  /// forever.
+  ///
+  /// The realistic trigger is a Secure Enclave blob whose key this device can no longer use — a
+  /// restore onto another device, or the Enclave being reset. Nothing deleted the unusable item and
+  /// nothing made a replacement, so `dataKey()` threw on every subsequent call for the lifetime of
+  /// the install. On the `.cacheFirst` path `TraciveClient` reads through `readIgnoringFailures`,
+  /// which swallows it, so the only visible symptom was that every check went to the server and was
+  /// billed. Forever, silently.
+  func testAnUnusableStoredKeyIsReplacedRatherThanThrownOnForever() throws {
+    // A blob with an unrecognised marker: `deriveKey` cannot make a key from it, exactly as it
+    // cannot from an Enclave blob belonging to another device.
+    let items = FakeCacheKeyItemStore(stored: Data([0xEE, 0x01, 0x02, 0x03]))
+    let store = KeychainCacheKeyStore(items: items, usesSecureEnclaveWhenAvailable: false)
+
+    let key = try store.dataKey()
+
+    XCTAssertEqual(key.bitCount, 256)
+    XCTAssertEqual(items.deleteCount, 1, "the unusable item must be removed")
+    XCTAssertEqual(items.addCount, 1, "a replacement must be written")
+    XCTAssertNotNil(items.stored)
+    XCTAssertNotEqual(items.stored, Data([0xEE, 0x01, 0x02, 0x03]))
+
+    // And the replacement is now the stable key: a second call neither re-heals nor re-derives.
+    let again = try KeychainCacheKeyStore(items: items, usesSecureEnclaveWhenAvailable: false)
+      .dataKey()
+    XCTAssertEqual(again, key, "the replacement key must be stable across store instances")
+    XCTAssertEqual(items.deleteCount, 1, "recovery must not run again")
+  }
+
+  /// The transient case must keep propagating untouched. Deleting a perfectly good key because the
+  /// device happened to be locked would destroy the user's cache for no reason, and this is the
+  /// distinction the whole fix turns on.
+  func testAKeychainOutageStillPropagatesAndDoesNotDestroyTheKey() throws {
+    let items = FakeCacheKeyItemStore(stored: Data([0x01]) + Data(repeating: 0x07, count: 32))
+    items.readError = CheckCacheError.dataKeyUnavailable(status: errSecInteractionNotAllowed)
+    let store = KeychainCacheKeyStore(items: items, usesSecureEnclaveWhenAvailable: false)
+
+    XCTAssertThrowsError(try store.dataKey()) { error in
+      guard case .dataKeyUnavailable = error as? CheckCacheError else {
+        return XCTFail("expected dataKeyUnavailable, got \(error)")
+      }
+    }
+    XCTAssertEqual(items.deleteCount, 0, "a transient outage must not delete the stored key")
+    XCTAssertEqual(items.addCount, 0)
+  }
+
+  /// Recovery makes exactly one attempt and does not loop.
+  ///
+  /// It cannot loop on the derive step by construction — `replaceUnusableKey` derives from the blob
+  /// it just generated, not from a re-read — so the way to probe the bound is to fail the *write*.
+  /// The error must then propagate rather than being retried, and the caller is left with the same
+  /// cold-cache outcome it had before, not a spin.
+  func testRecoveryMakesOneAttemptAndPropagatesAWriteFailure() throws {
+    let items = FakeCacheKeyItemStore(stored: Data([0xEE]))
+    items.addError = CheckCacheError.dataKeyUnavailable(status: errSecInteractionNotAllowed)
+    let store = KeychainCacheKeyStore(items: items, usesSecureEnclaveWhenAvailable: false)
+
+    XCTAssertThrowsError(try store.dataKey()) { error in
+      guard case .dataKeyUnavailable = error as? CheckCacheError else {
+        return XCTFail("expected dataKeyUnavailable, got \(error)")
+      }
+    }
+    XCTAssertEqual(items.deleteCount, 1, "exactly one recovery attempt, not a loop")
+    XCTAssertEqual(items.addCount, 1, "and exactly one write attempt")
+  }
+
+  /// The ordinary first-run path still works through the seam: no item, so one is created.
+  func testAnEmptyStoreCreatesAndPersistsAKey() throws {
+    let items = FakeCacheKeyItemStore(stored: nil)
+    let store = KeychainCacheKeyStore(items: items, usesSecureEnclaveWhenAvailable: false)
+
+    let key = try store.dataKey()
+
+    XCTAssertEqual(key.bitCount, 256)
+    XCTAssertEqual(items.addCount, 1)
+    XCTAssertEqual(items.deleteCount, 0, "nothing was unusable, so nothing should be deleted")
+  }
+
   /// `CheckCacheError` carries an `any Error` in one case, so it is not `Equatable`; match the case.
   private func assertPayloadUnreadable(
     _ error: any Error,
@@ -817,5 +903,65 @@ final class TestClock: @unchecked Sendable {
   /// Pass this straight into `SQLiteCheckCache(now:)`.
   var provider: @Sendable () -> Date {
     { [self] in self.now }
+  }
+}
+
+/// An in-memory `CacheKeyItemStore`, so the data-key recovery path can be exercised without the
+/// Keychain. Counts its operations, because "was the unusable item actually deleted?" is the whole
+/// question — a recovery that silently left the old item behind would still return a usable key.
+final class FakeCacheKeyItemStore: CacheKeyItemStore, @unchecked Sendable {
+
+  private let lock = NSLock()
+  private var blob: Data?
+  private var deletes = 0
+  private var adds = 0
+
+  /// Thrown by `read()` instead of answering. Used for the transient-outage case.
+  var readError: Error?
+  /// Thrown by `add()` instead of storing. Used to bound the recovery attempt.
+  var addError: Error?
+
+  init(stored: Data?) {
+    self.blob = stored
+  }
+
+  func read() throws -> Data? {
+    if let readError { throw readError }
+    lock.lock()
+    defer { lock.unlock() }
+    return blob
+  }
+
+  func add(_ blob: Data) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    adds += 1
+    if let addError { throw addError }
+    self.blob = blob
+  }
+
+  func delete() throws {
+    lock.lock()
+    defer { lock.unlock() }
+    deletes += 1
+    blob = nil
+  }
+
+  var stored: Data? {
+    lock.lock()
+    defer { lock.unlock() }
+    return blob
+  }
+
+  var deleteCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return deletes
+  }
+
+  var addCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return adds
   }
 }

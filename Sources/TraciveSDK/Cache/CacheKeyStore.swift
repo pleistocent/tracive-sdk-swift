@@ -81,11 +81,33 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
     self.accessGroup = accessGroup
     self.usesSecureEnclaveWhenAvailable = usesSecureEnclaveWhenAvailable
     self.cache = KeyBox()
+    self.items = KeychainCacheKeyItemStore(
+      service: service, account: account, accessGroup: accessGroup)
+  }
+
+  /// Test seam. `internal`, so the public surface is unchanged: partners always get the Keychain.
+  /// Exists because an unsigned `swift test` binary cannot touch the real Keychain, which is why
+  /// this type had no coverage at all before.
+  init(
+    items: any CacheKeyItemStore,
+    service: String = "id.tracive.sdk.cache",
+    account: String = "check-cache-data-key-v1",
+    usesSecureEnclaveWhenAvailable: Bool = true
+  ) {
+    self.service = service
+    self.account = account
+    self.accessGroup = nil
+    self.usesSecureEnclaveWhenAvailable = usesSecureEnclaveWhenAvailable
+    self.cache = KeyBox()
+    self.items = items
   }
 
   /// In-memory memo. Deriving through the Secure Enclave costs a few milliseconds — trivial once,
   /// ruinous per row.
   private let cache: KeyBox
+
+  /// The raw item operations, behind a seam so the recovery path is testable.
+  private let items: any CacheKeyItemStore
 
   private static let rawMarker: UInt8 = 0x01
   private static let secureEnclaveMarker: UInt8 = 0x02
@@ -95,33 +117,69 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
     if let memoised = cache.value { return memoised }
 
     let key: SymmetricKey
-    if let stored = try readItem() {
-      key = try deriveKey(fromStoredBlob: stored)
-    } else {
-      let blob = try makeNewBlob()
-      // A concurrent first-use on another thread may have written first. `errSecDuplicateItem` is
-      // therefore expected, not exceptional: re-read and use whatever won the race, so both threads
-      // end up with the same key rather than one silently encrypting under a key that is about to be
-      // overwritten.
-      do {
-        try addItem(blob)
-        key = try deriveKey(fromStoredBlob: blob)
-      } catch CheckCacheError.dataKeyUnavailable(let status) where status == errSecDuplicateItem {
-        guard let winner = try readItem() else { throw CheckCacheError.dataKeyCorrupt }
-        key = try deriveKey(fromStoredBlob: winner)
-      }
+    do {
+      key = try loadOrCreateKey()
+    } catch CheckCacheError.dataKeyCorrupt {
+      // The item exists but cannot produce a usable key: a bad marker, a wrong-length raw key, or
+      // — the realistic case — a Secure Enclave blob whose key this device can no longer use, after
+      // a restore onto another device or an Enclave reset.
+      //
+      // Before, this threw forever. Nothing deleted the unusable item and nothing made a
+      // replacement, so `dataKey()` failed on every call for the lifetime of the install.
+      // `TraciveClient` reaches the cache through `readIgnoringFailures` on the `.cacheFirst` path,
+      // which swallows the error, so the visible result was that every check went to the server and
+      // was billed, forever, with nothing surfaced anywhere — not even through
+      // `cacheInitializationError`, since construction succeeds.
+      //
+      // A key that is gone should mean "make a new one and start cold", which is exactly
+      // `SQLiteCheckCache`'s stated posture for every other fault. The old rows are unreadable
+      // whatever we do here; `SQLiteCheckCache` drops rows it cannot decrypt, so the cache recovers
+      // as cold rather than dead.
+      //
+      // Exactly one recovery attempt: if the replacement is *also* unusable, the fault is not a
+      // stale item and retrying would spin.
+      key = try replaceUnusableKey()
     }
 
     cache.value = key
     return key
   }
 
+  /// The ordinary path: use the stored blob if there is one, otherwise create and persist one.
+  ///
+  /// Throws `dataKeyUnavailable` — the Keychain being unreadable *right now*, e.g. before first
+  /// unlock — unchanged. That is transient and must keep propagating; deleting a perfectly good key
+  /// because the device happened to be locked would destroy the user's cache for no reason.
+  private func loadOrCreateKey() throws -> SymmetricKey {
+    if let stored = try items.read() {
+      return try deriveKey(fromStoredBlob: stored)
+    }
+
+    let blob = try makeNewBlob()
+    // A concurrent first-use on another thread may have written first. `errSecDuplicateItem` is
+    // therefore expected, not exceptional: re-read and use whatever won the race, so both threads
+    // end up with the same key rather than one silently encrypting under a key that is about to be
+    // overwritten.
+    do {
+      try items.add(blob)
+      return try deriveKey(fromStoredBlob: blob)
+    } catch CheckCacheError.dataKeyUnavailable(let status) where status == errSecDuplicateItem {
+      guard let winner = try items.read() else { throw CheckCacheError.dataKeyCorrupt }
+      return try deriveKey(fromStoredBlob: winner)
+    }
+  }
+
+  /// Discards an unusable stored key and starts over.
+  private func replaceUnusableKey() throws -> SymmetricKey {
+    try items.delete()
+    let blob = try makeNewBlob()
+    try items.add(blob)
+    return try deriveKey(fromStoredBlob: blob)
+  }
+
   public func destroyDataKey() throws {
     cache.value = nil
-    let status = SecItemDelete(baseQuery() as CFDictionary)
-    guard status == errSecSuccess || status == errSecItemNotFound else {
-      throw CheckCacheError.dataKeyUnavailable(status: status)
-    }
+    try items.delete()
   }
 
   // MARK: - Blob handling
@@ -158,7 +216,9 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
           let shared = try? privateKey.sharedSecretFromKeyAgreement(with: privateKey.publicKey)
         else {
           // The item was written by a Secure Enclave that is no longer reachable — a restore onto
-          // another device, or the Enclave being reset. The key is gone for good.
+          // another device, or the Enclave being reset. This key is gone for good, and every row
+          // encrypted under it is unreadable whatever happens next. `dataKey()` catches this and
+          // replaces the item, so the outcome is a cold cache rather than a dead one.
           throw CheckCacheError.dataKeyCorrupt
         }
         return shared.hkdfDerivedSymmetricKey(
@@ -184,10 +244,37 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
   /// `internal` rather than `private` only so the test suite can assert on the query this store
   /// actually uses. Asserting on a re-derived copy would be a check that cannot fail.
   func baseQuery() -> [String: Any] {
+    (items as? KeychainCacheKeyItemStore)?.baseQuery()
+      ?? KeychainItemQuery.base(service: service, account: account, accessGroup: accessGroup)
+  }
+}
+
+/// The three raw item operations `KeychainCacheKeyStore` needs, behind a seam.
+///
+/// This exists so the key-recovery path can be tested. A `swift test` binary is unsigned, so it
+/// cannot touch the real Keychain — which meant the corrupt-key handling in `dataKey()` had no
+/// coverage at all and could regress silently. The seam is `internal`: the public surface is
+/// unchanged and partners still get the Keychain implementation.
+protocol CacheKeyItemStore: Sendable {
+  /// The stored blob, or `nil` when there is no item. Throws `dataKeyCorrupt` for an item that is
+  /// present but unusable, and `dataKeyUnavailable` when the store itself cannot be read.
+  func read() throws -> Data?
+  func add(_ blob: Data) throws
+  func delete() throws
+}
+
+/// The production `CacheKeyItemStore`: one Keychain generic-password item.
+struct KeychainCacheKeyItemStore: CacheKeyItemStore {
+
+  let service: String
+  let account: String
+  let accessGroup: String?
+
+  func baseQuery() -> [String: Any] {
     KeychainItemQuery.base(service: service, account: account, accessGroup: accessGroup)
   }
 
-  private func readItem() throws -> Data? {
+  func read() throws -> Data? {
     var query = baseQuery()
     query[kSecReturnData as String] = true
     query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -205,13 +292,20 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
     }
   }
 
-  private func addItem(_ blob: Data) throws {
+  func add(_ blob: Data) throws {
     var query = baseQuery()
     query[kSecValueData as String] = blob
     query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
     let status = SecItemAdd(query as CFDictionary, nil)
     guard status == errSecSuccess else {
+      throw CheckCacheError.dataKeyUnavailable(status: status)
+    }
+  }
+
+  func delete() throws {
+    let status = SecItemDelete(baseQuery() as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else {
       throw CheckCacheError.dataKeyUnavailable(status: status)
     }
   }
