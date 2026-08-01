@@ -21,6 +21,11 @@ The last line is the total, and `$?` is the answer:
 swift test; echo "exit: $?"
 ```
 
+Do not reach for `${PIPESTATUS[0]}` to read it through a pipe. In zsh — the default shell on macOS,
+where this package is developed — that array is spelled `pipestatus` and is 1-indexed, so
+`${PIPESTATUS[0]}` expands to nothing. The line prints `exit:` with an empty value after it, which
+at a glance reads exactly like success. Redirect to a file and read `$?` with no pipe at all.
+
 The swift-testing runner also announces `Test run with 0 tests in 0 suites passed`. That is not a
 warning: this package's tests are XCTest, so that runner legitimately has nothing to do.
 
