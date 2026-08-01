@@ -64,9 +64,10 @@ public enum AuthorizeURLBuilder {
   /// - `partner_user_id` — the partner's own opaque id for the user, which the server stores on the
   ///   grant so it can be echoed back in webhooks and can enforce the 1:1 account link.
   ///
-  /// **`partner_user_id` is required by the authorization server** even though `OAuthConfiguration`
-  /// makes it optional (the cross-language SDK surface is frozen that way). Omitting it produces a
-  /// server-side rejection at the consent step, not a local error — so set it.
+  /// **`partner_user_id` is required**, and `OAuthConfiguration` now enforces it rather than
+  /// documenting it: it was optional across all four SDK surfaces, and the rejection it produced
+  /// was worse than a server error — the Tracive app refuses client-side, with no redirect, so
+  /// the partner app receives nothing at all and no log records the attempt.
   ///
   /// There is no `client_secret` and no API key here, and there is nowhere to put one: a public
   /// mobile client cannot hold a secret, which is the whole reason PKCE exists.
@@ -98,9 +99,11 @@ public enum AuthorizeURLBuilder {
         URLQueryItem(name: "scope", value: configuration.scopes.joined(separator: " "))
       )
     }
-    if let partnerUserId = configuration.partnerUserId, !partnerUserId.isEmpty {
-      items.append(URLQueryItem(name: "partner_user_id", value: partnerUserId))
-    }
+    // Always present: OAuthConfiguration refuses to construct without a non-blank one, because
+    // the authorization server and the consent screen both require it. The value goes out as
+    // written — it is stored on the grant and echoed back to the partner, so trimming it here
+    // would hand them back something other than what they sent.
+    items.append(URLQueryItem(name: "partner_user_id", value: configuration.partnerUserId))
 
     // Preserve anything the integrator baked into a custom endpoint.
     components.queryItems = (components.queryItems ?? []) + items

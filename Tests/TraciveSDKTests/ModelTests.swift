@@ -358,13 +358,14 @@ final class ModelTests: XCTestCase {
 
   func testOAuthModeDefaultsToAPublicClient() throws {
     let redirect = try XCTUnwrap(URL(string: "https://partner.example/oauth/callback"))
-    let mode = TraciveMode.oauth(clientId: "partner-123", redirectUri: redirect)
+    let mode = TraciveMode.oauth(
+      clientId: "partner-123", redirectUri: redirect, partnerUserId: "partner-user-1")
 
     let configuration = try XCTUnwrap(mode.oauthConfiguration)
     XCTAssertEqual(configuration.clientId, "partner-123")
     XCTAssertEqual(configuration.redirectUri, redirect)
     XCTAssertEqual(configuration.scopes, [])
-    XCTAssertNil(configuration.partnerUserId)
+    XCTAssertEqual(configuration.partnerUserId, "partner-user-1")
     XCTAssertEqual(configuration.clientType, .public)
     XCTAssertNil(mode.proxyConfiguration)
 

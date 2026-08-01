@@ -19,7 +19,7 @@ public enum TraciveMode: Equatable, Hashable, Sendable {
     clientId: String,
     redirectUri: URL,
     scopes: [String] = [],
-    partnerUserId: String? = nil,
+    partnerUserId: String,
     clientType: ClientType = .public
   ) -> TraciveMode {
     .oauth(
@@ -63,17 +63,28 @@ public struct OAuthConfiguration: Equatable, Hashable, Sendable {
   /// Kept as `[String]`, not a closed enum, because the granted set comes back from the server and
   /// may name a scope registered after this SDK version shipped.
   public let scopes: [String]
-  /// The partner's own stable id for the end user, echoed back for reconciliation. Optional.
-  public let partnerUserId: String?
+  /// The partner's own stable id for the end user, echoed back for reconciliation.
+  ///
+  /// **Required, and non-blank.** The Tracive app refuses a consent without one, client-side and
+  /// before any network call, and by design returns no redirect — so the partner app is handed
+  /// nothing to handle and nothing anywhere records the attempt. It is also what the grant is
+  /// keyed on: echoed in `grant.revoked` and `grant.superseded` so a partner can map the event to
+  /// their own customer, and what enforces one partner account to one Tracive account. Opaque —
+  /// never a raw phone number or email.
+  public let partnerUserId: String
   public let clientType: ClientType
 
   public init(
     clientId: String,
     redirectUri: URL,
     scopes: [String] = [],
-    partnerUserId: String? = nil,
+    partnerUserId: String,
     clientType: ClientType = .public
   ) {
+    precondition(
+      !partnerUserId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      "OAuthConfiguration needs a partnerUserId. The authorization request must carry one: the Tracive app refuses a consent without it, client-side and with no redirect, so the failure would reach you as silence rather than as an error."
+    )
     self.clientId = clientId
     self.redirectUri = redirectUri
     self.scopes = scopes
