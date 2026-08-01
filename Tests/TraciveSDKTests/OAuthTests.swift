@@ -564,6 +564,137 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 0)
   }
 
+  /// A refresh that is already in flight must not write its rotated grant back after `signOut()`.
+  ///
+  /// The ordering that matters: `signOut()` awaits the revoke round trip, and the refresh is parked
+  /// on its own token round trip. If the revoke returns first, the store is cleared and *then* the
+  /// refresh resumes and saves. `refreshTask.cancel()` does not prevent this — cancellation is
+  /// cooperative, a custom transport need not honour it, and a response already on the wire arrives
+  /// regardless. The outcome is a live, freshly rotated refresh token sitting in the Keychain after
+  /// the user was told they had signed out.
+  ///
+  /// Both round trips are gated so the interleaving is deterministic rather than scheduler luck.
+  func testAnInFlightRefreshCannotResurrectTokensAfterSignOut() async throws {
+    let refreshGate = TestGate()
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("/oauth/token") {
+        // Park the refresh until sign-out has finished clearing the store.
+        await refreshGate.wait()
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return HTTPResponse(status: 200)  // the revoke, which returns immediately
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    // The box records the outcome either way, so the wait below ends as soon as the refresh
+    // finishes rather than idling out a timeout on the (expected) failure path.
+    let refreshOutcome = TestResultBox<String>()
+    Task {
+      do { refreshOutcome.set(try await oauth.refreshTokens(staleAccessToken: "access-1")) }
+      catch { refreshOutcome.set("threw: \(error)") }
+    }
+    // Wait until the refresh is genuinely parked mid-round-trip, not merely scheduled.
+    let refreshIsParked = await waitUntil { transport.count(pathSuffix: "/oauth/token") == 1 }
+    XCTAssertTrue(refreshIsParked, "the refresh never reached the transport")
+
+    await oauth.signOut()
+    XCTAssertNil(try store.load(), "sign-out did not clear the store even before the race")
+
+    // Now let the refresh finish. Its `save` lands after the clear.
+    await refreshGate.open()
+    _ = await refreshOutcome.settled(within: 2)
+
+    XCTAssertNil(
+      try store.load(),
+      "tokens were resurrected after signOut() — a live rotated refresh token survived sign-out"
+    )
+    let authorized = await oauth.isAuthorized
+    XCTAssertFalse(authorized, "the SDK still reports an authorized grant after signOut()")
+  }
+
+  /// The same race against `clearStoredTokens()`, which `TraciveClient` calls when the server
+  /// answers a check with 401 `grant_revoked`. The grant is dead server-side at that point; a
+  /// refresh completing afterwards must not put it back.
+  func testAnInFlightRefreshCannotResurrectTokensAfterClearStoredTokens() async throws {
+    let refreshGate = TestGate()
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, _ in
+      await refreshGate.wait()
+      return .ok(json: Fixtures.refreshedTokenJSON)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    // The box records the outcome either way, so the wait below ends as soon as the refresh
+    // finishes rather than idling out a timeout on the (expected) failure path.
+    let refreshOutcome = TestResultBox<String>()
+    Task {
+      do { refreshOutcome.set(try await oauth.refreshTokens(staleAccessToken: "access-1")) }
+      catch { refreshOutcome.set("threw: \(error)") }
+    }
+    let refreshIsParked = await waitUntil { transport.callCount == 1 }
+    XCTAssertTrue(refreshIsParked, "the refresh never reached the transport")
+
+    await oauth.clearStoredTokens()
+    XCTAssertNil(try store.load())
+
+    await refreshGate.open()
+    _ = await refreshOutcome.settled(within: 2)
+
+    XCTAssertNil(
+      try store.load(),
+      "a refresh wrote the grant back after the SDK decided it was revoked"
+    )
+  }
+
+  /// The code exchange is a round trip too, so it carries the same race: a `signOut()` landing
+  /// while the exchange is in flight must win, rather than the exchange storing a grant afterwards.
+  func testAnInFlightCodeExchangeCannotStoreAGrantAfterSignOut() async throws {
+    let exchangeGate = TestGate()
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { request, _ in
+      if request.url.path.hasSuffix("/oauth/token") {
+        await exchangeGate.wait()
+        return .ok(json: Fixtures.refreshedTokenJSON)
+      }
+      return HTTPResponse(status: 200)
+    }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let request = try await oauth.makeAuthorizationRequest()
+    let callbackOutcome = TestResultBox<AuthResult>()
+    Task {
+      let result = await oauth.handleCallback(
+        url: Self.callback(code: "the-code", state: request.state))
+      callbackOutcome.set(result)
+    }
+    let exchangeIsParked = await waitUntil { transport.count(pathSuffix: "/oauth/token") == 1 }
+    XCTAssertTrue(exchangeIsParked, "the exchange never reached the transport")
+
+    await oauth.signOut()
+
+    await exchangeGate.open()
+    let result = await callbackOutcome.settled(within: 2)
+
+    XCTAssertNil(try store.load(), "the exchange stored a grant after signOut()")
+    XCTAssertEqual(result?.testDescription, "failed")
+    let authorized = await oauth.isAuthorized
+    XCTAssertFalse(authorized)
+  }
+
+  /// The guard must not be so blunt that it breaks the ordinary case: a refresh that starts and
+  /// finishes with no sign-out in between still stores its rotated pair.
+  func testARefreshWithNoSignOutStillStoresItsRotatedPair() async throws {
+    let store = InMemoryTokenStore(tokens: Fixtures.storedTokens)
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let token = try await oauth.refreshTokens(staleAccessToken: "access-1")
+
+    XCTAssertEqual(token, "access-2")
+    XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
+  }
+
   // MARK: - Access token
 
   func testAccessTokenRequiresAGrant() async throws {

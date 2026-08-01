@@ -59,6 +59,19 @@ public actor TraciveOAuth {
   /// The in-flight refresh, if any. This single stored value *is* the single-flight guarantee.
   private var refreshTask: Task<TraciveTokens, Error>?
 
+  /// Bumped every time the grant is deliberately dropped (`signOut()`, `clearStoredTokens()`).
+  ///
+  /// Every write to `tokenStore` is conditional on the generation being unchanged since the
+  /// operation started. Without this, a token round trip that was already in flight when the user
+  /// signed out resumes afterwards and writes its result into a store that was just cleared,
+  /// leaving a live — and freshly rotated — refresh token on the device.
+  ///
+  /// Cancelling `refreshTask` is not a substitute. Cancellation in Swift is cooperative: a custom
+  /// `HTTPTransport` need not observe it, and a response already on the wire is delivered whatever
+  /// the task's cancellation state. The generation check is not cooperative — it runs immediately
+  /// before the write, on the actor, so no suspension can occur between the check and the write.
+  private var tokenGeneration: UInt64 = 0
+
   // MARK: - Init
 
   /// - Parameters:
@@ -240,7 +253,18 @@ public actor TraciveOAuth {
     }
 
     do {
+      let generation = tokenGeneration
       let tokens = try await exchange(code: code, codeVerifier: pkce.codeVerifier)
+
+      // Same race as the one `performRefresh` guards: the code exchange is a round trip, and a
+      // `signOut()` during it must win. Storing here would hand the user a live grant they never
+      // finished asking for.
+      guard generation == tokenGeneration else {
+        return finish(
+          .failed(.sdk("authorization_cancelled", "Signed out while the authorization was completing."))
+        )
+      }
+
       do {
         try tokenStore.save(tokens)
       } catch {
@@ -334,9 +358,14 @@ public actor TraciveOAuth {
 
     // Check-and-set with no `await` between them: the actor cannot interleave here, so a second
     // caller either sees `refreshTask` above or is short-circuited by the token comparison.
+    let generation = tokenGeneration
     let task = Task<TraciveTokens, Error> { [self] in
       defer { clearRefreshTask() }
-      return try await performRefresh(previous: stored, refreshToken: refreshToken)
+      return try await performRefresh(
+        previous: stored,
+        refreshToken: refreshToken,
+        generation: generation
+      )
     }
     refreshTask = task
     return try await task.value.accessToken
@@ -347,6 +376,7 @@ public actor TraciveOAuth {
   /// Called on a 401 `grant_revoked`: the tokens are already dead server-side, so keeping them only
   /// guarantees more failed calls.
   public func clearStoredTokens() {
+    tokenGeneration &+= 1
     try? tokenStore.clear()
   }
 
@@ -357,9 +387,18 @@ public actor TraciveOAuth {
   /// worse failure of the two.
   public func signOut() async {
     let tokens = storedTokens()
+
+    // Everything that invalidates the grant happens *before* the first suspension point, with no
+    // `await` in between, so no in-flight work can interleave and observe a half-done sign-out:
+    // the generation bump makes any token write already in flight a no-op, and the store is empty
+    // from here on even if the revoke round trip below hangs, fails, or the process is killed
+    // during it. Clearing after the revoke instead would leave a live grant on disk for the whole
+    // duration of a network call.
+    tokenGeneration &+= 1
     refreshTask?.cancel()
     refreshTask = nil
     pending = nil
+    try? tokenStore.clear()
 
     if let refreshToken = tokens?.refreshToken, !refreshToken.isEmpty {
       let body = FormURLEncoding.encode([
@@ -379,7 +418,6 @@ public actor TraciveOAuth {
       _ = try? await transport.send(request)
     }
 
-    try? tokenStore.clear()
     resumePending(
       with: .failed(.sdk("authorization_cancelled", "Signed out while an authorization was pending."))
     )
@@ -401,7 +439,8 @@ public actor TraciveOAuth {
 
   private func performRefresh(
     previous: TraciveTokens,
-    refreshToken: String
+    refreshToken: String,
+    generation: UInt64
   ) async throws -> TraciveTokens {
     let body = FormURLEncoding.encode([
       (name: "grant_type", value: "refresh_token"),
@@ -427,6 +466,20 @@ public actor TraciveOAuth {
         )
       }
       throw error
+    }
+
+    // The grant may have been dropped while this round trip was in flight. Writing now would undo
+    // a sign-out the user was already told had succeeded, and would leave the *rotated* refresh
+    // token — the newest and longest-lived one — sitting on a device the user believes is signed
+    // out. Fail the refresh instead; the stale token in `refreshed` is simply abandoned, which is
+    // what the server's own rotation already assumes for an unused token.
+    guard generation == tokenGeneration else {
+      throw TraciveError.grantRevoked(
+        TraciveErrorInfo(
+          code: "grant_revoked",
+          message: "The grant was dropped while the refresh was in flight."
+        )
+      )
     }
 
     // Rotation: replace the stored pair in one write so a crash cannot leave the old refresh token
