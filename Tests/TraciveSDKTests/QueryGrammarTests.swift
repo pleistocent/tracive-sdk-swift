@@ -52,6 +52,9 @@ final class QueryGrammarTests: XCTestCase {
       let safe: Bool
     }
     let maxUtf8Bytes: Int
+    /// Every rejection rule the API applies to a folded key, in the fixture's own words. Decoded so
+    /// a rule added upstream cannot be silently ignored by this SDK.
+    let rejected: [String]
     let cases: [Case]
   }
 
@@ -551,6 +554,63 @@ final class QueryGrammarTests: XCTestCase {
         }
       }
     }
+  }
+
+  /// Every rejection rule the fixture lists must be accounted for — implemented, or knowingly not.
+  ///
+  /// `DocumentIdGuard` implements six of the seven. The seventh, "contains a lone/unpaired UTF-16
+  /// surrogate", is unreachable in Swift and so is not implemented. That was previously an
+  /// *invisible* gap: the fixture's `documentIdGuard.rejected` list was not even decoded, so a rule
+  /// added upstream would have been silently ignored by this SDK. It is decoded now, and this test
+  /// fails if the list changes at all.
+  func testEveryDocumentIdRejectionRuleInTheFixtureIsAccountedFor() throws {
+    let fixture = try loadFixture()
+
+    XCTAssertEqual(
+      Set(fixture.documentIdGuard.rejected),
+      [
+        "empty string",
+        "contains '/'",
+        "exactly '.'",
+        "exactly '..'",
+        "matches ^__.*__$",
+        "> 1500 UTF-8 bytes",
+        // Not implemented — see below, and see `DocumentIdGuard`'s doc comment.
+        "contains a lone/unpaired UTF-16 surrogate",
+      ],
+      "the fixture's document-id rules changed; check DocumentIdGuard implements the new set"
+    )
+
+    // Why the surrogate rule is not implemented, asserted rather than asserted-in-prose. If a
+    // future Swift ever let a `String` carry a lone surrogate, this goes red and the guard needs
+    // the rule after all.
+    XCTAssertNil(Unicode.Scalar(UInt32(0xD800)), "a lone surrogate is not a constructible scalar")
+    let illFormed = String(decoding: [0xED, 0xA0, 0x80] as [UInt8], as: UTF8.self)
+    XCTAssertTrue(
+      illFormed.unicodeScalars.allSatisfy { $0.value == 0xFFFD },
+      "ill-formed bytes must be replaced with U+FFFD at String construction"
+    )
+    XCTAssertFalse(illFormed.unicodeScalars.contains { (0xD800...0xDFFF).contains($0.value) })
+  }
+
+  /// `matchesReservedPattern` is knowingly stricter than the server's `^__.*__$`, because
+  /// JavaScript's `.` does not match a newline — so `"__a\nb__"` is accepted server-side and
+  /// rejected here (verified by running that regex). Pinned so the divergence stays a recorded
+  /// decision, including its direction: over-rejection costs nothing, whereas accepting a key the
+  /// server refuses costs a credit on a request that cannot hit.
+  func testReservedPatternIsStricterThanTheServerAcrossANewline() throws {
+    XCTAssertThrowsError(try DocumentIdGuard.validate("__a\nb__")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.reason, .invalidDocumentId)
+    }
+
+    // …and it is unreachable through a builder, for a different reason than one might guess: the
+    // guard runs on the *folded key*, which every builder prefixes with its kind. So the string
+    // handed to the guard starts with "USERNAME_", never with "__", and can never match the
+    // reserved pattern however the caller's input is shaped.
+    let query = try TraciveQuery.username(platform: "TELEGRAM", handle: "__a\nb__")
+    XCTAssertTrue(query.searchQueryIndex.hasPrefix("USERNAME_TELEGRAM_"))
+    XCTAssertFalse(query.searchQueryIndex.hasPrefix("__"))
+    XCTAssertNoThrow(try DocumentIdGuard.validate(query.searchQueryIndex))
   }
 
   /// The byte limit is a number in the fixture, not a number in our head.
