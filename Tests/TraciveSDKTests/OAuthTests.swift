@@ -1087,3 +1087,83 @@ extension AuthResult {
     }
   }
 }
+
+// MARK: - Documented scope names
+
+/// The scope strings in the prose docs must be the ones the SDK actually asks for.
+///
+/// They were not. `README.md`, `Docs/integration.md` (twice) and `Docs/oauth.md` all said
+/// `"scammer.read"`, while every code path, sample and test in the package used `"scammer.check"`.
+/// Both cannot be right, and with the authorization server not deployed nobody could find out
+/// empirically. A partner copy-pasting the README's quick start would have requested a scope that
+/// does not exist and been answered `403 missing_scope` by `checkScammer` — an error whose
+/// documented remedy points them at their client registration rather than at the typo.
+///
+/// This drives the doc files themselves rather than restating their contents, because a test that
+/// merely asserted the canonical spelling would have passed happily while the README stayed wrong.
+final class DocumentedScopeTests: XCTestCase {
+
+  /// Every scope the authorization server is expected to register.
+  private static let canonicalScopes: Set<String> = ["scammer.check", "credits.read"]
+
+  private static var repositoryRoot: URL {
+    URL(fileURLWithPath: #filePath)  // Tests/TraciveSDKTests/OAuthTests.swift
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+  }
+
+  private static var documentationFiles: [URL] {
+    let root = repositoryRoot
+    let candidates =
+      ["README.md", "SECURITY.md", "CHANGELOG.md"].map { root.appendingPathComponent($0) }
+      + (
+        (try? FileManager.default.contentsOfDirectory(
+          at: root.appendingPathComponent("Docs"),
+          includingPropertiesForKeys: nil
+        )) ?? []
+      ).filter { $0.pathExtension == "md" }
+    return candidates.filter { FileManager.default.fileExists(atPath: $0.path) }
+  }
+
+  func testTheDocsOnlyMentionScopesTheSDKActuallyRequests() throws {
+    let files = Self.documentationFiles
+    XCTAssertFalse(files.isEmpty, "found no documentation to scan — this check would never fail")
+
+    // Anything shaped like one of our scope namespaces. Deliberately broad: the point is to catch a
+    // *plausible-looking but wrong* scope, which is exactly what "scammer.read" was.
+    let pattern = try NSRegularExpression(pattern: "\\b(?:scammer|credits)\\.[a-z]+\\b")
+
+    var offences: [String] = []
+    for file in files {
+      let text = try String(contentsOf: file, encoding: .utf8)
+      let range = NSRange(text.startIndex..., in: text)
+      for match in pattern.matches(in: text, range: range) {
+        guard let matched = Range(match.range, in: text) else { continue }
+        let scope = String(text[matched])
+        if !Self.canonicalScopes.contains(scope) {
+          offences.append("\(file.lastPathComponent): \(scope)")
+        }
+      }
+    }
+
+    XCTAssertEqual(
+      offences.sorted(), [],
+      "documentation names a scope the SDK never requests; both cannot be right"
+    )
+  }
+
+  /// The other direction: the canonical strings the docs are checked against must be the ones the
+  /// SDK really sends, or the check above would be pinning the wrong pair.
+  func testTheCanonicalScopesAreTheOnesPutOnTheWire() async throws {
+    let oauth = makeOAuth()
+    let request = try await oauth.makeAuthorizationRequest()
+
+    let sent = URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
+      .queryItems?.first { $0.name == "scope" }?.value
+    XCTAssertEqual(
+      Set((sent ?? "").split(separator: " ").map(String.init)),
+      Self.canonicalScopes
+    )
+  }
+}

@@ -181,7 +181,7 @@ by what your client is registered for:
 
 ```swift
 case .authorized(let grantedScopes):
-  guard grantedScopes.contains("scammer.read") else {
+  guard grantedScopes.contains("scammer.check") else {
     showMessage("Tracive access is limited; scammer checks are unavailable.")
     return
   }

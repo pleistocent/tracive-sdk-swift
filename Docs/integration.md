@@ -60,7 +60,7 @@ let tracive = TraciveClient(
   mode: .oauth(
     clientId: "your-client-id",
     redirectUri: URL(string: "https://yourapp.example.com/oauth/tracive")!,
-    scopes: ["scammer.read"],
+    scopes: ["scammer.check", "credits.read"],
     partnerUserId: currentUser.id,   // optional; echoed back for your own reconciliation
     clientType: .public              // .confidential if your backend holds a client secret
   ),
@@ -89,7 +89,7 @@ func connectTracive() async throws {
   switch await tracive.authorize() {
   case .authorized(let grantedScopes):
     // Check what you actually got — the user may have granted a subset.
-    guard grantedScopes.contains("scammer.read") else {
+    guard grantedScopes.contains("scammer.check") else {
       showMessage("Tracive access is limited; scammer checks are unavailable.")
       return
     }

@@ -97,7 +97,7 @@ let client = TraciveClient(
   mode: .oauth(
     clientId: "your-client-id",
     redirectUri: URL(string: "https://yourapp.example.com/oauth/tracive")!,
-    scopes: ["scammer.read"]
+    scopes: ["scammer.check", "credits.read"]
   ),
   environment: .production
 )
