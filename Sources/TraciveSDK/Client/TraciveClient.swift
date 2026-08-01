@@ -311,6 +311,19 @@ public actor TraciveClient {
   }
 
   /// Revokes the grant best-effort and clears local tokens regardless of the outcome.
+  ///
+  /// **This does not clear the cache.** The encrypted result store survives sign-out, and its rows
+  /// are keyed by `SHA-256` of a phone number or email address — a search space small enough to
+  /// brute-force offline — so on a shared device the next user could confirm which identifiers the
+  /// previous one looked up. Call `cache.clear()` too whenever the device may be shared:
+  ///
+  /// ```swift
+  /// await client.signOut()
+  /// try? client.cache.clear()
+  /// ```
+  ///
+  /// Left as two calls deliberately: keeping a warm cache across a re-login on a single-user device
+  /// is a legitimate choice, and clearing it means paying for those checks again.
   public func signOut() async {
     await oauth?.signOut()
   }

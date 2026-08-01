@@ -414,6 +414,10 @@ public actor TraciveOAuth {
   /// `POST /v1/oauth/revoke` is **best effort** — offline, 500, or a refused revoke all still clear
   /// local state. A sign-out that leaves a token on the device because the network was down is the
   /// worse failure of the two.
+  ///
+  /// Scope note: this clears the *grant*, not the check cache. `TraciveOAuth` does not own the
+  /// cache and cannot reach it. See `TraciveClient.signOut()` for why the caller must clear it
+  /// separately on a shared device.
   public func signOut() async {
     let tokens = storedTokens()
 

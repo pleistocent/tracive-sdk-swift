@@ -308,6 +308,20 @@ release still reaches you intact.
 - `TraciveQuery`, `CheckCacheKey`, `ProxyConfiguration` and `TraciveQueryError` all redact themselves
   in `description`, so a stray `print`, `os_log` interpolation or crash report cannot leak an
   identifier or a bearer token.
+- **`signOut()` does not clear the cache.** It revokes the grant and drops the tokens; the encrypted
+  store survives. Those rows are keyed by `SHA-256` of a phone number or an email address — a small
+  enough search space to brute-force offline — so on a shared device the next user could confirm
+  which identifiers the previous one checked. Call `try? client.cache.clear()` alongside `signOut()`
+  whenever a device may be shared:
+
+  ```swift
+  await client.signOut()
+  try? client.cache.clear()   // not implied by signOut(); see Docs/oauth.md
+  ```
+
+  The two are separate calls because they are separate decisions — an app where the device is
+  single-user may reasonably keep a warm cache across a re-login, and clearing it costs real money
+  in re-billed checks.
 
 ---
 
