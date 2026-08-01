@@ -19,7 +19,9 @@ private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.sel
 /// behind its own lock.
 final class SQLiteConnection {
 
-  private let handle: OpaquePointer
+  /// `fileprivate` so `SQLiteStatement`, which lives in this file, can reach it. Nothing outside
+  /// this file ever sees the raw C handle.
+  fileprivate let handle: OpaquePointer
 
   /// - Parameter path: a filesystem path, or `":memory:"` for a private in-memory database.
   init(path: String) throws {
@@ -57,7 +59,7 @@ final class SQLiteConnection {
   }
 
   func prepare(_ sql: String) throws -> SQLiteStatement {
-    try SQLiteStatement(database: handle, sql: sql)
+    try SQLiteStatement(connection: self, sql: sql)
   }
 
   /// Rows changed by the most recent statement.
@@ -88,18 +90,35 @@ final class SQLiteConnection {
 final class SQLiteStatement {
 
   private let handle: OpaquePointer
-  private let database: OpaquePointer
 
-  fileprivate init(database: OpaquePointer, sql: String) throws {
+  /// A **strong** reference to the connection that prepared this statement, not just its raw
+  /// pointer.
+  ///
+  /// A statement is only valid while its database handle is open, and holding the bare
+  /// `OpaquePointer` made that an invariant the *caller* had to maintain. It happened to hold —
+  /// `SQLiteCheckCache` keeps its connection alive for the whole lifetime of every statement — but
+  /// nothing enforced it, and both types are visible across the module, so the first caller to
+  /// outlive a statement past its connection would get a use-after-free rather than a compile
+  /// error. Owning the connection makes the lifetime correct by construction.
+  ///
+  /// This does not defeat `sqlite3_close_v2`, which already defers the real close until every
+  /// outstanding statement is finalised. It removes the window before that: with only a raw
+  /// pointer, the wrapper could deinit and call `close_v2` while a statement still held a dangling
+  /// copy of the handle.
+  private let connection: SQLiteConnection
+
+  private var database: OpaquePointer { connection.handle }
+
+  fileprivate init(connection: SQLiteConnection, sql: String) throws {
     var statement: OpaquePointer?
-    let code = sqlite3_prepare_v2(database, sql, -1, &statement, nil)
+    let code = sqlite3_prepare_v2(connection.handle, sql, -1, &statement, nil)
     guard code == SQLITE_OK, let prepared = statement else {
-      let message = String(cString: sqlite3_errmsg(database))
+      let message = String(cString: sqlite3_errmsg(connection.handle))
       if let statement { sqlite3_finalize(statement) }
       throw CheckCacheError.storageFailure(code: code, message: message)
     }
     self.handle = prepared
-    self.database = database
+    self.connection = connection
   }
 
   deinit {

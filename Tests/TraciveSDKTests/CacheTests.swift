@@ -734,6 +734,47 @@ final class CacheTests: XCTestCase {
     XCTAssertNotNil(try cache.read(query), "and it must be served again afterwards")
   }
 
+  // MARK: - Statement lifetime
+
+  /// A `SQLiteStatement` must keep its `SQLiteConnection` alive.
+  ///
+  /// The statement stored only the raw `OpaquePointer`, so "the connection outlives every statement
+  /// prepared from it" was an invariant the *caller* had to maintain. `SQLiteCheckCache` does
+  /// maintain it, which is why nothing was broken — but nothing enforced it either, and both types
+  /// are reachable across the module, so the first caller to hold a statement past its connection
+  /// would get a use-after-free rather than a compile error.
+  ///
+  /// Asserted through a weak reference rather than by actually using a statement after its
+  /// connection died: that would be undefined behaviour, so a test built on it could pass by luck
+  /// on the very build where the bug is live. Object lifetime is the thing that is actually
+  /// deterministic here.
+  func testAStatementKeepsItsConnectionAlive() throws {
+    weak var observedConnection: SQLiteConnection?
+    var statement: SQLiteStatement?
+
+    do {
+      let connection = try SQLiteConnection(path: ":memory:")
+      observedConnection = connection
+      try connection.execute("CREATE TABLE t (a INTEGER);")
+      try connection.execute("INSERT INTO t (a) VALUES (7);")
+      statement = try connection.prepare("SELECT a FROM t;")
+      XCTAssertNotNil(observedConnection)
+    }
+    // The only strong reference left is the one inside `statement`.
+
+    XCTAssertNotNil(
+      observedConnection,
+      "the connection was deallocated while a statement prepared from it was still alive"
+    )
+
+    // …and the statement is still usable, which is the point of keeping it alive.
+    XCTAssertTrue(try XCTUnwrap(statement).step())
+    XCTAssertEqual(try XCTUnwrap(statement).int(0), 7)
+
+    statement = nil
+    XCTAssertNil(observedConnection, "releasing the last statement must release the connection")
+  }
+
   // MARK: - Data-key recovery
   //
   // These drive `KeychainCacheKeyStore` through an injected item store, so they exercise the real
