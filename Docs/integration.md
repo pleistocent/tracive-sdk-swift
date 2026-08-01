@@ -53,6 +53,14 @@ Full details, including the confidential-client variant: [`oauth.md`](oauth.md).
 Once, at app start. Hold it for the app's lifetime — it owns the token store, the single-flight
 refresh and the cache connection, and creating a second one gives you two of each.
 
+**`TraciveClient.init` does blocking I/O.** With the default cache it opens (and on first run
+creates) the SQLite database in Application Support, migrates it and prunes it, all synchronously on
+the calling thread; the first check after that reaches the Keychain and the Secure Enclave. "At app
+start" in SwiftUI usually means the main thread, so on a cold launch this is real work in front of
+your first frame. If your launch budget is tight, build the client off the main thread and hand it
+to your UI when it is ready, or construct a `SQLiteCheckCache` yourself and inject it at a moment
+you control.
+
 ```swift
 import TraciveSDK
 

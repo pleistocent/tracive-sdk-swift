@@ -87,6 +87,23 @@ public actor TraciveClient {
   ///     if the policy is enabled, falling back to `NoOpCheckCache` (and recording
   ///     `cacheInitializationError`) if that fails. **Tests should always pass one explicitly** —
   ///     the default touches Application Support and the Keychain.
+  ///
+  /// ## This initialiser does blocking I/O
+  ///
+  /// When no `cache` is injected and caching is enabled, `init` synchronously opens (and on first
+  /// run creates) the SQLite file in Application Support, configures and migrates it, and runs a
+  /// prune pass. The first cache access after that reaches the Keychain and, on a device that has
+  /// one, the Secure Enclave.
+  ///
+  /// All of it happens on whichever thread calls `init`. The guidance to build the client once at
+  /// app start usually means the main thread in a SwiftUI or `AppDelegate` context, so on a cold
+  /// launch — an empty database, a Keychain item that does not exist yet, an Enclave key still to
+  /// be generated — this is real work in front of the first frame.
+  ///
+  /// If that matters for your launch budget, construct the client off the main thread and hand it
+  /// to your UI once it is ready, or pass a `cache` you built yourself at a moment of your
+  /// choosing. Passing `cachePolicy: .disabled` also avoids it, at the cost of paying for every
+  /// repeat check.
   ///   - tokenStore: where OAuth tokens live. Defaults to the Keychain. Ignored if `oauth` is
   ///     supplied.
   ///   - oauth: a pre-built OAuth driver, for a host app that needs a custom app launcher or a
