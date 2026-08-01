@@ -349,6 +349,12 @@ The tests use `EphemeralCacheKeyStore` rather than the real Keychain, because a 
 is unsigned and Keychain access from one either fails outright or prompts a human — and a test that
 can prompt is a test that hangs CI.
 
+That "100% offline" is **enforced, not just intended**: `OfflineGuaranteeTests` scans the test
+sources and fails the build if any test constructs `URLSessionHTTPTransport` or the production
+`KeychainCacheKeyStore()`, or calls `SQLiteCheckCache(…)` without a `keyStore:` or `TraciveClient(…)`
+without a `cache:` — the two defaults that would otherwise reach the Keychain and Application
+Support one omitted argument at a time.
+
 `SQLiteCheckCache.schemaVersion` is the invalidation lever: bump it and every stored row is dropped
 on the next launch. Do that whenever the payload shape or the encryption format changes.
 
