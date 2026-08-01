@@ -99,6 +99,17 @@ source compatibility until the API freezes at 1.0.
 
 ### Changed
 
+- **An empty crypto address and an empty username platform now have their own rejection reasons**,
+  `empty_address` and `empty_platform`, instead of sharing the generic `empty_value`. Three
+  different mistakes used to arrive as one token, so a caller catching the error could not tell
+  which of the two arguments it had just been handed was the blank one, and could not put the
+  message on the right field. `empty_value` remains, with an empty email as its only user.
+
+  Source-breaking for anything that matches on `QueryRejectionReason.emptyValue` for a crypto or
+  username rejection, or compares `rawReason` against `"empty_value"` for one; switch to
+  `.emptyAddress` / `.emptyPlatform`. The tokens are the shared cross-SDK contract, so Kotlin and
+  Flutter carry the identical spelling.
+
 - `query-grammar-vectors.json` updated to **version 5**: 34 vectors, 14 rejection cases and 9
   document-id guard cases. The `nfcScope` note now states correctly that NFC applies to *every* code
   field, the bank code included, and a new `bank-code-nfc-composes-before-uppercasing` vector pins

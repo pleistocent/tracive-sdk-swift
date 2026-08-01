@@ -17,8 +17,14 @@ public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
   /// hit.
   case emptyAccountId = "empty_account_id"
   case emptyBankCode = "empty_bank_code"
-  /// Empty value for a single-value input (email, crypto address, username platform).
+  /// Empty value for a single-value input. Email is the only remaining user: an empty crypto
+  /// address and an empty username platform have their own reasons below, so a caller can put the
+  /// message on the field that is actually blank.
   case emptyValue = "empty_value"
+  /// Empty crypto address. `CRYPTO_ETH_` can only miss, and a miss is billed.
+  case emptyAddress = "empty_address"
+  /// Empty username platform. `USERNAME__scammerx` cannot match any stored key.
+  case emptyPlatform = "empty_platform"
   /// The email contains no `@`, so it cannot be an address. The server applies no shape validation
   /// of its own — `EMAIL_budi` is a legal record key, so it would be looked up, missed and billed.
   /// This rejection is the only thing that prevents the charge.
@@ -63,6 +69,10 @@ public struct TraciveQueryError: Error, Equatable, Hashable, Sendable, CustomStr
       return "The bank code is empty."
     case .emptyValue:
       return "The value is empty."
+    case .emptyAddress:
+      return "The crypto address is empty."
+    case .emptyPlatform:
+      return "The platform name is empty."
     case .notAnEmail:
       return "That is not an email address — it has no '@'."
     case .emptyHandle:

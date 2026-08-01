@@ -83,10 +83,7 @@ final class QueryGrammarTests: XCTestCase {
   // be empty, and these two constants deleted, once the series has landed.
 
   /// `rejected[].id`s whose rejection this SDK does not implement yet.
-  private static let pendingRejectedIds: Set<String> = [
-    "crypto-empty-address",  // empty_address
-    "username-empty-platform",  // empty_platform
-  ]
+  private static let pendingRejectedIds: Set<String> = []
 
   /// `documentIdGuard.cases[].value`s whose verdict this SDK does not match yet.
   private static let pendingGuardValues: Set<String> = [
@@ -311,6 +308,33 @@ final class QueryGrammarTests: XCTestCase {
       Array(query.searchQueryIndex.utf8).contains(0xCC),
       "the folded key still contains a combining mark, so NFC was not applied"
     )
+  }
+
+  /// An empty crypto address and an empty username platform each get their own reason token.
+  ///
+  /// They used to share the generic `empty_value` with an empty email, which made three different
+  /// mistakes indistinguishable: a caller catching the error could not tell which of the two
+  /// arguments it had just been handed was the blank one, so it could not put the message on the
+  /// right field. The tokens are wire contract, so they are asserted literally here.
+  func testEmptyAddressAndEmptyPlatformHaveTheirOwnReasons() {
+    XCTAssertThrowsError(try TraciveQuery.crypto(chain: "ETH", address: "   ")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "empty_address")
+    }
+    XCTAssertThrowsError(try TraciveQuery.username(platform: "  ", handle: "scammerx")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "empty_platform")
+    }
+
+    // The neighbouring tokens are untouched: a blank chain and a blank handle keep theirs, and an
+    // empty email keeps the generic one, which is now its only user.
+    XCTAssertThrowsError(try TraciveQuery.crypto(chain: " ", address: "0xabc")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "empty_chain")
+    }
+    XCTAssertThrowsError(try TraciveQuery.username(platform: "TELEGRAM", handle: " ")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "empty_handle")
+    }
+    XCTAssertThrowsError(try TraciveQuery.email(value: "  ")) { error in
+      XCTAssertEqual((error as? TraciveQueryError)?.rawReason, "empty_value")
+    }
   }
 
   /// A value with no `@` is rejected before the request, because the server would happily look it

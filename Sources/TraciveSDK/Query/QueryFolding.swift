@@ -171,7 +171,7 @@ enum QueryFolding {
   /// admits only the lowercase form, so neither is folded.
   static func foldCryptoAddress(_ raw: String) throws -> String {
     let trimmed = jsTrim(raw)
-    guard !trimmed.isEmpty else { throw TraciveQueryError(.emptyValue) }
+    guard !trimmed.isEmpty else { throw TraciveQueryError(.emptyAddress) }
     return isEvmAddress(trimmed) ? trimmed.lowercased() : trimmed
   }
 
@@ -188,7 +188,7 @@ enum QueryFolding {
   /// Platform: NFC, uppercase, trim.
   static func foldPlatform(_ raw: String) throws -> String {
     let folded = jsTrim(raw.precomposedStringWithCanonicalMapping.uppercased())
-    guard !folded.isEmpty else { throw TraciveQueryError(.emptyValue) }
+    guard !folded.isEmpty else { throw TraciveQueryError(.emptyPlatform) }
     return folded
   }
 
