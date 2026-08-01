@@ -49,21 +49,44 @@ jobs:
             exit 1
           fi
 
-      - name: Show toolchain
-        run: swift --version
-
-      - name: Resolve dependencies
-        # There are none, and that is the point (§11.6). This step fails loudly the moment somebody
-        # adds one: `Package.resolved` should never be created.
+      - name: No third-party dependencies
+        # A partner integrating a fraud-check SDK takes on our supply chain, so this package has
+        # none — and this step is what keeps it that way.
+        #
+        # It replaces a guard that could not fail. That one ran `swift package resolve` and then
+        # inspected `Package.resolved` only `if [ -f ... ]`. For a dependency-free manifest
+        # `swift package resolve` writes no `Package.resolved` at all, so the body never executed
+        # and the step was unconditionally green. It also silently assumed the v2 file format (a v1
+        # file uses "package"/"repositoryURL" and would have slipped through), and it covered only
+        # the root manifest — `Example/Package.swift` has a real `dependencies:` array and no guard
+        # whatsoever, so a third-party package added to the public example would have shipped
+        # unchecked.
+        #
+        # Asserting on the manifest itself avoids all of that: `dump-package` always produces
+        # output, so there is no "file missing, therefore fine" path. A local path dependency
+        # serialises under "fileSystem" and is allowed — that is how the Example consumes the SDK
+        # the way a partner would; every other kind fails the build.
+        #
+        # Verified in both directions locally: adding a `.package(url:)` to either manifest makes
+        # this exit 1 naming the offending manifest, and the clean tree passes.
         run: |
-          swift package resolve
-          if [ -f Package.resolved ] && [ -s Package.resolved ]; then
-            if grep -q '"identity"' Package.resolved; then
-              echo "::error::A third-party dependency was added. This package must stay dependency-free (plan 11.6)."
-              cat Package.resolved
+          for manifest in . Example; do
+            if ! dump=$(swift package --package-path "$manifest" dump-package 2>&1); then
+              echo "::error::could not read ${manifest}/Package.swift"
+              echo "$dump"
               exit 1
             fi
-          fi
+            remote=$(printf '%s' "$dump" | python3 -c '
+          import json, sys
+          deps = json.load(sys.stdin).get("dependencies", [])
+          print(", ".join(sorted({k for d in deps for k in d if k != "fileSystem"})))
+          ')
+            if [ -n "$remote" ]; then
+              echo "::error::third-party dependency declared in ${manifest}/Package.swift (kind: ${remote}). This package ships into partner apps and must stay dependency-free."
+              exit 1
+            fi
+            echo "ok: no third-party dependency in ${manifest}/Package.swift"
+          done
 
       - name: Build
         run: swift build -v
