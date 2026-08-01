@@ -245,6 +245,17 @@ func handle(_ error: TraciveError) {
     // Tokens are already cleared. Send the user back through consent.
     showReconnect()
 
+  case .invalidToken(let info):
+    // No usable grant is stored, and nothing was sent to the server. `info.code` is `no_grant`
+    // when nobody has authorised yet, and `unusable_grant` when the stored record kept neither an
+    // access token nor a refresh token. Log the second one separately — it points at local
+    // storage rather than at the user, and it is not something they did.
+    //
+    // A record that has lost only its access token never reaches here: while the refresh token
+    // beside it is good, the SDK renews it with a single token request and carries on, which shows
+    // up as one unexplained refresh before the call you actually made.
+    showReconnect()
+
   case .missingScope, .detailNotPermitted:
     log("This client is not entitled to that call: \(error.serverCode ?? "-")")
 

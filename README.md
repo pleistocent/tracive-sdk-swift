@@ -345,6 +345,7 @@ Everything throws `TraciveError`. The interesting cases:
 | `.rateLimited(retryAfter:info:)` | 429 | back off by `retryAfter` |
 | `.grantRevoked` | the whole grant is gone | tokens are already cleared; restart consent. **Do not retry** |
 | `.expiredToken` | refresh failed | restart consent |
+| `.invalidToken` | no usable grant is stored. `info.code` says which: `no_grant` — nobody has authorised yet; `unusable_grant` — the stored record lost its access token and had no refresh token left to renew from | call `authorize()`. Nothing was sent to the server, so no call was billed. Worth logging `unusable_grant` separately: it points at local storage, not at the user |
 | `.missingScope` / `.detailNotPermitted` | 403 | your client is not entitled to that call |
 | `.cacheMiss` | `.cache` source with nothing fresh stored — or with `detail: .full`, which no row can answer | go to the server |
 | `.network(cause:)` | no HTTP response at all | offline; see the idempotency note above before retrying |
