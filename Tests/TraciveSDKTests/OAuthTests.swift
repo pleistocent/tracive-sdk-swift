@@ -556,6 +556,71 @@ final class OAuthTests: XCTestCase {
     XCTAssertNil(try store.load())
   }
 
+  /// A callback that arrives while the launcher is still opening must not strand the caller.
+  ///
+  /// `authorize()` used to set `pending`, then **await** `appLauncher.open(...)`, and only install
+  /// its continuation after that resumed. The actor is free during that suspension, so a
+  /// `handleCallback(url:)` landing in the window found `pending` set, validated `state`, exchanged
+  /// the code, stored the grant and called `resumePending(...)` — which returned early, because
+  /// there was no continuation yet. `authorize()` then installed a continuation nobody would ever
+  /// resume.
+  ///
+  /// The symptom is not a plain hang: the app really *is* authorized and the tokens really *are*
+  /// stored, while the partner's `await` never returns and its UI sits on a spinner forever.
+  ///
+  /// Reachable through a custom `TraciveAppLauncher` whose `open` does async work of its own, and
+  /// through a host app that drives the launch itself via the public `makeAuthorizationRequest()`
+  /// and forwards the callback promptly.
+  func testACallbackArrivingDuringTheLaunchStillResumesAuthorize() async throws {
+    let launchGate = TestGate()
+    let launcher = GatedAppLauncher(openGate: launchGate)
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store, launcher: launcher)
+
+    let authorizeOutcome = TestResultBox<AuthResult>()
+    Task { authorizeOutcome.set(await oauth.authorize()) }
+
+    // Wait until `open` is parked mid-launch — this is precisely the window the bug lives in.
+    let parkedInOpen = await waitUntil { launcher.openCallCount == 1 }
+    XCTAssertTrue(parkedInOpen, "the launcher was never asked to open the authorize URL")
+
+    // The callback beats the launcher's completion.
+    let state = try XCTUnwrap(Self.queryItems(of: try XCTUnwrap(launcher.lastOpenedURL))["state"])
+    let callbackResult = await oauth.handleCallback(url: Self.callback(code: "abc", state: state))
+    XCTAssertEqual(callbackResult.testDescription, "authorized")
+
+    await launchGate.open()
+
+    guard let result = await authorizeOutcome.settled(within: 2) else {
+      return XCTFail("authorize() never returned — its continuation was lost")
+    }
+    XCTAssertEqual(result.testDescription, "authorized")
+    XCTAssertNotNil(try store.load(), "the grant should have been stored by the callback")
+  }
+
+  /// The launch-failure path has to keep working once the continuation is installed first: a
+  /// refused `open` must resume the waiting caller rather than leave it suspended.
+  func testARefusedLaunchResumesAuthorizeWithALaunchFailure() async throws {
+    let launcher = RefusingOpenAppLauncher()
+    let oauth = makeOAuth(launcher: launcher)
+
+    let result = await oauth.authorize()
+
+    guard case .failed(let error) = result else {
+      return XCTFail("Expected a launch failure, got \(result).")
+    }
+    XCTAssertEqual(error.serverCode, "app_launch_failed")
+
+    // The attempt must also be forgotten, or its `state` would still satisfy a later callback.
+    let stale = await oauth.handleCallback(url: Self.callback(code: "abc", state: "whatever"))
+    if case .failed(let staleError) = stale {
+      XCTAssertEqual(staleError.kind, .stateMismatch)
+    } else {
+      XCTFail("Expected the abandoned attempt's state to be cleared, got \(stale).")
+    }
+  }
+
   // MARK: - Keychain query shape
   //
   // These build a query dictionary and assert on it. They never call `SecItemAdd`, so the suite's
@@ -880,6 +945,55 @@ final class FakeAppLauncher: TraciveAppLauncher, @unchecked Sendable {
     defer { lock.unlock() }
     return openedURLs
   }
+}
+
+/// A launcher whose `open` parks on a gate, standing in for any `TraciveAppLauncher` that does
+/// async work of its own before reporting the launch as done. `canOpen` answers immediately, so the
+/// app-presence pre-check is not what is being held.
+final class GatedAppLauncher: TraciveAppLauncher, @unchecked Sendable {
+
+  private let openGate: TestGate
+  private let lock = NSLock()
+  private var opened: [URL] = []
+
+  init(openGate: TestGate) {
+    self.openGate = openGate
+  }
+
+  func canOpen(_ url: URL) async -> Bool { true }
+
+  @discardableResult
+  func open(_ url: URL) async -> Bool {
+    record(url)
+    await openGate.wait()
+    return true
+  }
+
+  var openCallCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return opened.count
+  }
+
+  var lastOpenedURL: URL? {
+    lock.lock()
+    defer { lock.unlock() }
+    return opened.last
+  }
+
+  private func record(_ url: URL) {
+    lock.lock()
+    defer { lock.unlock() }
+    opened.append(url)
+  }
+}
+
+/// Reports the app as installed but refuses to open the authorize URL — the system declining the
+/// hand-off. `FakeAppLauncher` cannot express this: its `open` always succeeds.
+final class RefusingOpenAppLauncher: TraciveAppLauncher, @unchecked Sendable {
+  func canOpen(_ url: URL) async -> Bool { true }
+  @discardableResult
+  func open(_ url: URL) async -> Bool { false }
 }
 
 /// A token store whose writes always fail — a full disk, a locked Keychain, a missing entitlement.

@@ -183,14 +183,43 @@ public actor TraciveOAuth {
       return .failed(.sdk("authorization_request_failed", "Could not build the authorize URL."))
     }
 
-    guard await appLauncher.open(request.url) else {
-      pending = nil
-      return .failed(.sdk("app_launch_failed", "The system declined to open the authorize link."))
-    }
-
+    // The continuation is installed **before** the launch, not after it.
+    //
+    // Opening the URL is an `await`, and the actor is free for its duration. A `handleCallback(url:)`
+    // arriving in that window would find `pending` set, validate `state`, complete the exchange,
+    // store the grant and call `resumePending(...)` — which would return early, because the
+    // continuation did not exist yet. `authorize()` would then install a continuation nobody could
+    // ever resume: the app authorized, the tokens stored, and the caller's `await` suspended
+    // forever behind a spinner.
+    //
+    // Installing first closes the window: from here on there is always someone to resume, whether
+    // the callback wins or the launch does.
     return await withCheckedContinuation { continuation in
       pendingContinuation = continuation
+      // This `Task` inherits the actor's isolation, so `abandonAttempt` needs no hop — but the
+      // `await` on `open` still releases the actor, which is exactly what lets a callback run.
+      Task { [self] in
+        guard await appLauncher.open(request.url) else {
+          abandonAttempt(withState: request.state)
+          return
+        }
+      }
     }
+  }
+
+  /// Fails the attempt identified by `state`, if it is still the outstanding one.
+  ///
+  /// The state check is what makes this safe to call from the detached launch task. By the time a
+  /// refused `open` reports back, the slot may already belong to somebody else — a newer
+  /// `authorize()`, or a callback that already consumed this attempt — and clearing `pending`
+  /// unconditionally would cancel their flow instead of ours. In both of those cases our own
+  /// continuation has already been resumed by whoever took the slot, so there is nothing stranded.
+  private func abandonAttempt(withState state: String) {
+    guard pending?.state == state else { return }
+    pending = nil
+    resumePending(
+      with: .failed(.sdk("app_launch_failed", "The system declined to open the authorize link."))
+    )
   }
 
   /// Completes the flow from the redirect URL (§6 steps 5–6).
