@@ -81,6 +81,11 @@ an older attempt fails with `TraciveError`, `serverCode == "authorization_expire
 not `.stateMismatch`, because "start again" and "somebody may be attacking you" are different
 messages. Send the user back through `authorize()`.
 
+That answer is reached **only after the `state` has matched**, and the order matters. A redirect
+that fails the state check is a mismatch whatever the attempt's age, so waiting the window out buys
+a forged URL nothing — neither a different answer, nor the erasure the expiry branch performs. Only
+a genuinely late redirect, which carries a matching state, is told that it expired.
+
 The record is erased on every outcome that spends or abandons an attempt: success, `.denied`, a
 server-reported error, a failed exchange, `cancelPendingAuthorization()`, `signOut()` and
 `clearStoredTokens()`. So a spent callback cannot be replayed, even by a later process.

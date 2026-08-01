@@ -439,11 +439,33 @@ public actor TraciveOAuth {
       return finish(.failed(.stateMismatch))
     }
 
+    guard let state = parameters["state"], traciveConstantTimeEquals(state, attempt.state) else {
+      // The record is deliberately **not** cleared here, and this is the one terminal-looking
+      // outcome that must not clear it. Any app on the device can hand the host app a URL, so
+      // clearing on a mismatch would let a stray or hostile redirect cancel the consent the user is
+      // in the middle of — a denial of service that costs an attacker one `open`. Nothing is spent
+      // by a mismatch, so nothing needs consuming.
+      return finish(.failed(.stateMismatch))
+    }
+
+    // Expiry is checked AFTER `state`, and this used to be the other way round.
+    //
+    // The argument for checking it first was that an attempt nobody ever came back to should be
+    // collected rather than left in the Keychain. That does not survive contact with when this
+    // method runs: if nobody comes back, `handleCallback` is never called, and neither order
+    // collects anything. The only case the old order collected earlier was a *forged or stray*
+    // redirect arriving after the window — and collecting there is precisely the denial of service
+    // the branch above refuses to allow, reached by waiting ten minutes first.
+    //
+    // Checking `state` first also gives every forgery one answer. Under the old order a caller
+    // could tell "there is an attempt and it has gone stale" apart from "your state is wrong",
+    // which is a fact about this user's session handed to anyone who can call `open`.
+    //
+    // The distinct diagnostic is kept, which is the part worth being careful about: this code
+    // means "start again" rather than "somebody may be attacking you", and a partner should be able
+    // to tell those apart. A genuinely late redirect carries a matching state, so it still arrives
+    // here and is still told exactly that. A forged one never reaches it.
     if attempt.isStale(at: clock.now) {
-      // Checked before `state`, so an attempt nobody ever came back to is collected rather than
-      // left in the Keychain until something happens to dislodge it. Reported with its own code
-      // rather than as `.stateMismatch`: this one means "start again", not "somebody may be
-      // attacking you", and a partner should be able to tell those apart.
       forgetPendingAuthorization()
       return finish(
         .failed(
@@ -454,16 +476,6 @@ public actor TraciveOAuth {
           )
         )
       )
-    }
-
-    guard let state = parameters["state"], traciveConstantTimeEquals(state, attempt.state) else {
-      // The record is deliberately **not** cleared here, and this is the one terminal-looking
-      // outcome that must not clear it. Any app on the device can hand the host app a URL, so
-      // clearing on a mismatch would let a stray or hostile redirect cancel the consent the user is
-      // in the middle of — a denial of service that costs an attacker one `open`. Nothing is spent
-      // by a mismatch, so nothing needs consuming: a genuinely abandoned attempt is collected by
-      // the expiry above instead, and a spent one was cleared by whichever branch spent it.
-      return finish(.failed(.stateMismatch))
     }
 
     // One callback per attempt: consume the material now so a replay cannot re-enter.

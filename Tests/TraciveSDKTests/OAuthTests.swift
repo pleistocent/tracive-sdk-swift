@@ -674,6 +674,36 @@ final class OAuthTests: XCTestCase {
     XCTAssertFalse(TraciveTokens(accessToken: "a").isExpired(at: issued))
   }
 
+  /// A forged redirect arriving after the window reports the mismatch, and leaves the record alone.
+  ///
+  /// This is the ordering test. `state` is compared before expiry, so waiting out the window buys
+  /// an attacker nothing: the answer is the same one a forgery gets at any age, and the attempt the
+  /// user may still be in the middle of survives. Under the old order this returned
+  /// `authorization_expired` *and* cleared the record — the same denial of service the mismatch
+  /// branch refuses, reached by being patient about it.
+  func testAForgedRedirectAfterTheWindowIsStillOnlyAMismatch() async throws {
+    let clock = RecordingClock()
+    let store = InMemoryTokenStore()
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store, clock: clock)
+
+    _ = try await oauth.makeAuthorizationRequest()
+    clock.advance(by: 601)
+
+    let result = await oauth.handleCallback(url: Self.callback(code: "abc", state: "not-the-state"))
+
+    guard case .failed(let error) = result else {
+      return XCTFail("Expected a forged redirect to fail, got \(String(describing: result)).")
+    }
+    XCTAssertEqual(
+      error.kind, .stateMismatch,
+      "a forgery must learn nothing about the age of the record it did not match")
+    XCTAssertEqual(transport.callCount, 0)
+    XCTAssertNotNil(
+      try store.loadPending(),
+      "and must not be able to cancel the attempt by waiting the window out first")
+  }
+
   /// A callback for an attempt older than the maximum age is refused, and the record is dropped.
   ///
   /// The clock advances by an absolute 601 seconds rather than by `maxAge + 1`, so this pins the
