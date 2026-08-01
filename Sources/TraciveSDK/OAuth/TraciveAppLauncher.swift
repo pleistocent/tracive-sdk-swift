@@ -34,8 +34,10 @@ public enum TraciveAppPresence {
 
   /// Custom scheme of the production Tracive app (`com.pleistocent.tracive`).
   public static let productionScheme = "tracive"
-  /// Custom scheme of the sandbox/dev app (`com.pleistocent.tracive.dev`). Sandbox and production
-  /// are fully separate worlds by design — a production app never handles a sandbox consent.
+  /// Custom scheme of the sandbox build. Sandbox and production are fully separate worlds by
+  /// design — a production app never handles a sandbox consent, and neither claims the other's
+  /// scheme. The scheme is what this SDK probes for; the sandbox build's application id is not
+  /// something it needs, so it is not named here.
   public static let sandboxScheme = "tracivedev"
 
   /// The `Info.plist` key the **host app** must populate for the pre-check to work.
