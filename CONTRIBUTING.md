@@ -156,8 +156,21 @@ strings or commit messages — may name any of the following:
 Say **"the Tracive API"** or **"the server"**. Say **"record key"**. Say **"phase 1" / "phase 2"**.
 
 The single allowed exception is the Android application id `com.pleistocent.tracive`, which the
-app-presence check genuinely needs. No other application id belongs here — a non-production variant
-appears nowhere in shipping code, so naming one only discloses that it exists.
+app-presence check genuinely needs, plus this repository's own GitHub path. No other application id
+belongs here — a non-production variant appears nowhere in shipping code, so naming one only
+discloses that it exists.
+
+The repository's own path is carved out because the rule was over-broad, not because the repository
+was in violation: `README.md` and `Docs/integration.md` open with
+`.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", …)`, and the changelog's
+compare links are built from the same path. That is the install instruction. A published package
+that may not name the repository it is published from cannot be installed, and a rule that forbids
+what the artefact necessarily ships teaches reviewers to ignore it. The React Native SDK's
+`CONTRIBUTING.md` carries the same carve-out in the same words.
+
+Nothing else about a repository is carved out. "This repository's own GitHub path" means this
+package's public URL and nothing beyond it — not a private repository, not another Tracive
+repository, and not a path with an internal branch, commit or file appended.
 
 There is no automated scan in this repository. That makes it your responsibility and the reviewer's,
 and it makes the diff the place to catch it: read what you wrote as a stranger would, before it is
