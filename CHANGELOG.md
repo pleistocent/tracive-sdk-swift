@@ -33,6 +33,44 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **An unrecoverable stored grant was reported as `.grantRevoked`, which said the server had done
+  something it had not done.** A stored record holding a blank access token with no refresh token
+  beside it has nothing left to spend and nothing to renew from, so `accessToken()` fails — that
+  much was right. What it failed *with* was wrong. `.grantRevoked` means the server revoked the
+  grant, and on this path nothing is sent and nothing is rejected: one field of a local file is
+  empty. No one revoked anything.
+
+  It now throws `TraciveError.invalidToken` carrying the new code `unusable_grant`, which is both
+  the honest answer and the one the Kotlin, Flutter and React Native SDKs already give. **An
+  integrator alerting on `.grantRevoked` will stop seeing it from this cause** — and that is the
+  point of the change rather than a side effect of it. Revocation is how the server's reuse
+  detection surfaces, so alerting on it is a sensible thing to do; the old error fired that alert
+  for a damaged file on a single device and sent whoever answered it looking for a server-side event
+  that had never happened. What is left produces `.grantRevoked` only after something really did
+  happen to the grant: the server answering `401 grant_revoked` on a request or
+  `invalid_grant`/`grant_revoked` on a refresh, a refresh that a rejected token started finding
+  nothing left to renew from, and a `signOut()` dropping the grant while a refresh is in flight.
+  Merely reading a damaged record off the device is no longer one of them.
+
+  The code is `unusable_grant` rather than the `no_grant` an absent record gets, because the two
+  states point at different things. `no_grant` is a user who has not authorized; this is local
+  storage that kept half a grant. Both are terminal for the caller and the remedy for both is
+  `authorize()`, but only one of them is worth looking at a device's storage over. Callers matching
+  on `TraciveError.invalidToken` without inspecting `info.code` need no change at all.
+
+  **The record is no longer erased.** The old behaviour cleared it, as a side effect of routing this
+  case through `refreshTokens(…)` — the branch that reports a rejected refresh, where clearing is
+  right because the grant really is finished. Here nothing had been rejected, so a partner debugging
+  the first report found a store that no longer held what the report was about, and a second call
+  answered `no_grant` instead of repeating itself. Asking twice now gives the same answer twice. No
+  sibling SDK erases on this path either. `clearStoredTokens()` and `signOut()` remain the ways a
+  grant is dropped, both of them deliberate.
+
+  The blank-token *repair* — a blank access token with a live refresh token beside it — is
+  unchanged, still delegates to `refreshTokens(…)`, and still inherits its single-flight guarantee.
+  An empty-string refresh token is now treated the same as an absent one on this path, matching the
+  test `refreshTokens(…)` has always applied, so the correction has no gap in it.
+
 - **A stored grant whose access token was blank put `Bearer ` on the wire, and could never
   recover.** `TraciveTokens.accessToken` is a plain `String`, so a stored record whose
   `access_token` is the empty string decodes exactly as cleanly as any other value — a partial
@@ -54,11 +92,11 @@ source compatibility until the API freezes at 1.0.
   wasted round trip at a time, and the round trip bought nothing that was not already knowable
   before the send.
 
-  With no refresh token beside it there is nothing to renew with, and the existing
-  `refreshTokens(…)` already says so: it clears the unusable record and throws `.grantRevoked`.
-  That is terminal in the same way the `no_grant` guard above it is, and it leaves the store
-  holding what the record actually amounted to — so the next call reports `no_grant` and the host
-  app sends the user through `authorize()`.
+  With no refresh token beside it there is nothing to renew with, which is terminal in the same way
+  the `no_grant` guard above it is: the host app sends the user through `authorize()`. That case was
+  first delegated to `refreshTokens(…)` and reported as `.grantRevoked`; the entry above corrects it
+  to `.invalidToken` with the code `unusable_grant`, in the same unreleased version, and is the
+  description to read.
 
   The recovery is routed through the ordinary `refreshTokens(…)` rather than a private refresh, so
   it inherits the single-flight guarantee rather than opening a second door around it. A blank
@@ -76,9 +114,8 @@ source compatibility until the API freezes at 1.0.
   every other call; nothing in this package had one.
 
   `Docs/oauth.md` and diagram 3 of `Docs/architecture.md` describe the branch, and the diagram also
-  gains the "is there a refresh token at all" decision it had always omitted, which is the node
-  this new path can reach. The React Native SDK applies the identical rule, and the four SDKs are
-  standardising on it.
+  gains the "is there a refresh token at all" decision it had always omitted. The React Native SDK
+  applies the identical rule, and the four SDKs are standardising on it.
 
 - **An authorization did not survive the host app being terminated during consent, and the loss was
   reported as a state mismatch.** The pending attempt — the PKCE `code_verifier` and the `state` —

@@ -1523,9 +1523,16 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(try store.load()?.refreshToken, "refresh-2")
   }
 
-  /// With no refresh token there is nothing to renew with, so the record is terminal. It is also
-  /// cleared, which is what makes the *next* call report `no_grant` rather than repeating this.
-  func testABlankAccessTokenWithNoRefreshTokenIsTerminal() async throws {
+  /// With no refresh token there is nothing to renew with, so the record is terminal — and it is
+  /// terminal in the way an *absent* grant is, which is what it gets to say.
+  ///
+  /// This answered `.grantRevoked` until now, and that was not merely inconsistent with the other
+  /// SDKs: it was a false statement about the server. Nothing is sent on this path and nothing is
+  /// rejected on it. One field of a local record is empty and there is no refresh token beside it
+  /// to renew it from; no one revoked anything. A partner alerting on revocation — a reasonable
+  /// thing to watch, because revocation is how the server's reuse detection surfaces — was paged by
+  /// a damaged file on one device and sent looking for a server-side event that never happened.
+  func testABlankAccessTokenWithNoRefreshTokenReportsAnInvalidToken() async throws {
     let store = InMemoryTokenStore(
       tokens: TraciveTokens(accessToken: "", refreshToken: nil, scopes: ["scammer.check"])
     )
@@ -1534,14 +1541,63 @@ final class OAuthTests: XCTestCase {
 
     let error = await expectTraciveError { try await oauth.accessToken() }
 
-    XCTAssertEqual(error?.kind, .grantRevoked)
+    XCTAssertEqual(error?.kind, .invalidToken)
+    // Its own code, so a reader can tell "no record at all" from "a record with nothing usable in
+    // it". The two want different things looked at: one is a user who has not authorized, the
+    // other is local storage that lost half a grant.
+    XCTAssertEqual(error?.serverCode, "unusable_grant")
     XCTAssertEqual(transport.callCount, 0, "there was nothing to send and nothing was sent")
-    XCTAssertNil(try store.load())
-    let authorized = await oauth.isAuthorized
-    XCTAssertFalse(authorized)
+  }
 
+  /// An empty-string refresh token is as unrenewable as an absent one, and answers identically.
+  ///
+  /// The guard has to agree with `refreshTokens(…)`'s own, which treats `""` and `nil` alike. If it
+  /// only checked for `nil`, this record would still be handed to `refreshTokens(…)` and would
+  /// still come back as a revocation that never happened — the bug, surviving in the one shape
+  /// nobody writes a test for.
+  func testABlankAccessTokenWithAnEmptyRefreshTokenReportsAnInvalidToken() async throws {
+    let store = InMemoryTokenStore(
+      tokens: TraciveTokens(accessToken: "", refreshToken: "", scopes: ["scammer.check"])
+    )
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let error = await expectTraciveError { try await oauth.accessToken() }
+
+    XCTAssertEqual(error?.kind, .invalidToken)
+    XCTAssertEqual(error?.serverCode, "unusable_grant")
+    XCTAssertEqual(transport.callCount, 0)
+  }
+
+  /// Asking twice gives the same answer, because the first attempt does not destroy the evidence.
+  ///
+  /// The old path erased the record on its way out — a side effect of routing this case through
+  /// `refreshTokens(…)` — so a second call reported `no_grant` and a partner debugging the first
+  /// report found a store that no longer held what the report was about. Reading a damaged record
+  /// is not a reason to delete it: no sibling SDK deletes it, nothing was spent that needs
+  /// consuming, and the deletion threw away whatever the store still held.
+  func testTheUnusableRecordSurvivesTheCallAndTheAnswerDoesNotChange() async throws {
+    let store = InMemoryTokenStore(
+      tokens: TraciveTokens(accessToken: "", refreshToken: nil, scopes: ["scammer.check"])
+    )
+    let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.refreshedTokenJSON) }
+    let oauth = makeOAuth(transport: transport, tokenStore: store)
+
+    let first = await expectTraciveError { try await oauth.accessToken() }
     let again = await expectTraciveError { try await oauth.accessToken() }
-    XCTAssertEqual(again?.serverCode, "no_grant")
+
+    XCTAssertEqual(first?.kind, again?.kind)
+    XCTAssertEqual(first?.serverCode, again?.serverCode)
+    XCTAssertEqual(again?.serverCode, "unusable_grant", "not no_grant — nothing erased the record")
+    XCTAssertEqual(try store.load()?.scopes, ["scammer.check"])
+    XCTAssertEqual(transport.callCount, 0)
+    // `isAuthorized` consequently keeps answering `true`, where the erasing version flipped it to
+    // `false` on the first read. That is the documented contract rather than a wrinkle: it reports
+    // whether a grant is stored and says outright that it is not a liveness check. A record is
+    // stored. Deciding whether it is any good is what `accessToken()` is for, and it now says so
+    // the same way every time it is asked.
+    let authorized = await oauth.isAuthorized
+    XCTAssertTrue(authorized)
   }
 
   /// The recovery goes through the ordinary `refreshTokens(…)`, so it inherits the single-flight

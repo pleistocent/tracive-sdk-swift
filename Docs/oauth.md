@@ -271,10 +271,22 @@ token beside it completely intact.
 
 The SDK refreshes that grant instead of sending `Bearer `, and returns the fresh token. The refresh
 token is the grant, and it is still good; throwing it away because a different field is empty would
-sign the user out of something that still works. If there is no refresh token either, there is
-nothing to renew with: the unusable record is cleared and the call fails with
-`TraciveError.grantRevoked`, after which the next call reports `no_grant`. Send the user through
-`authorize()`.
+sign the user out of something that still works.
+
+If there is no refresh token either — absent, or stored as an empty string — there is nothing to
+renew with, and the call fails with `TraciveError.invalidToken` carrying the code `unusable_grant`.
+Nothing is sent, and the record is left exactly as it was found, so asking again gives the same
+answer rather than a different one. Send the user through `authorize()`.
+
+**This is not `.grantRevoked`, and the difference is factual rather than cosmetic.**
+`.grantRevoked` means the server revoked the grant — a real event, usually reuse detection firing,
+and a reasonable thing for a partner to alert on. On this path nothing was sent and nothing was
+rejected: one field of a local record is empty and there is no credential left to spend, so no one
+revoked anything. The code is `unusable_grant` rather than the `no_grant` you get from an absent
+record, because the two want different things looked at: `no_grant` is a user who has not
+authorized, and this is local storage that kept half a grant. The remedy for both is `authorize()`.
+The Kotlin, Flutter and React Native SDKs all answer their own `invalidToken` here, so the four now
+agree.
 
 Do not expect the 401 path to cover this for you if you are reimplementing the token layer. An empty
 bearer is malformed rather than expired, so the server answers `invalid_token` — which is terminal
@@ -307,6 +319,14 @@ case .grantRevoked:
 
 Do not retry. Do not refresh. The grant is gone — from the user revoking it in the Tracive app, from
 an administrator, or from reuse detection firing. Send the user back through consent.
+
+Every one of those is something that happened **to the grant**, and this error is reserved for that.
+It reaches you from a `401 grant_revoked` on any request, from a refresh the server answered with
+`invalid_grant` or `grant_revoked`, from a refresh that a rejected token started and that found no
+refresh token to renew from, and from a `signOut()` that dropped the grant while a refresh was in
+flight. It does **not** reach you from a damaged record read off the device — that is
+`.invalidToken` with the code `unusable_grant`, as described above. So an alert on `.grantRevoked`
+is an alert on a grant that really ended, not on one device's storage.
 
 ## Sign-out
 

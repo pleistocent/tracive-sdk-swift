@@ -205,6 +205,8 @@ flowchart TD
   A["oauth.accessToken()"]
   NG["throw .invalidToken with code no_grant"]
   BK{"stored access token is blank"}
+  BR{"a refresh token is stored beside it"}
+  UG["throw .invalidToken with code unusable_grant, the record left alone"]
   B["attach Authorization Bearer and call transport.send"]
   TR{"isRetryable and attempts left"}
   W["sleep for the backoff, then resend"]
@@ -234,7 +236,9 @@ flowchart TD
   A -->|"nothing stored"| NG
   A -->|"a grant is stored"| BK
   BK -->|"no"| B
-  BK -->|"yes, refresh before anything is sent"| RF
+  BK -->|"yes"| BR
+  BR -->|"yes, refresh before anything is sent"| RF
+  BR -->|"no, nothing to renew with"| UG
   B -->|"transport threw"| TR
   TR -->|"yes"| W
   W --> A
@@ -290,9 +294,24 @@ each time to be told something that was knowable before the send.
 
 The renewal goes through the same `refreshTokens(…)` as the 401 path rather than a private one, so
 it inherits the single-flight guarantee below: a blank token discovered while a refresh is already
-running joins that refresh instead of racing it. With no refresh token beside it there is nothing to
-renew with, the unusable record is cleared, and `.grantRevoked` is thrown — terminal in the same way
-the `no_grant` guard is, and the next call reports `no_grant`, which is what the record amounted to.
+running joins that refresh instead of racing it.
+
+With no refresh token beside it — absent, or stored as an empty string — there is nothing to renew
+with, and `accessToken()` answers that case itself instead of delegating: `.invalidToken` with the
+code `unusable_grant`, nothing sent, and the record left as it was found. It is terminal in the same
+way the `no_grant` guard is, and it stays terminal in the same way on every later call, because
+nothing erased what the report was about.
+
+The diagram used to route this case into `refreshTokens(…)` and out through the node that clears the
+store and throws `.grantRevoked`, and that was a false statement about the server rather than merely
+an odd one. `.grantRevoked` means the server revoked the grant; here nothing was sent and nothing
+was rejected. A partner alerting on revocation — a sensible alert, since revocation is how reuse
+detection surfaces — was paged by a damaged file on one device.
+
+Every edge still reaching that node follows something that really happened to the grant: a
+`401 grant_revoked` on a request, an `invalid_grant`/`grant_revoked` answer to the refresh, a
+refresh started by a token the server had already rejected and left with nothing to renew from, and
+a refresh whose result is abandoned because `signOut()` dropped the grant while it was in flight.
 
 ### Single-flight, and why it is not an optimisation
 

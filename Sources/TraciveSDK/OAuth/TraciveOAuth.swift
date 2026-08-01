@@ -549,11 +549,29 @@ public actor TraciveOAuth {
   /// the grant is discarded. The damaged record would therefore not heal on the next request; it
   /// would fail permanently, one wasted round trip at a time.
   ///
-  /// With no refresh token beside it there is nothing to renew, and `refreshTokens(…)` says so in
-  /// its own words: it clears the unusable record and throws `.grantRevoked`. That is terminal in
-  /// the same way the `no_grant` guard above is, and it leaves the store in the state the record
-  /// really amounted to — so the next call reports `no_grant` and the host app sends the user
-  /// through `authorize()`.
+  /// With no refresh token beside it there is nothing to renew with, and that case is answered
+  /// **here** rather than delegated: it throws `.invalidToken` with the code `unusable_grant`,
+  /// sends nothing, and leaves the record exactly as it found it.
+  ///
+  /// It is not `.grantRevoked`, and the distinction is a matter of fact rather than of taste.
+  /// `.grantRevoked` means the server revoked the grant, which is a real event with a real cause —
+  /// usually reuse detection — and it is worth a partner's alert. Nothing is sent on this path and
+  /// nothing is rejected on it: one field of a local record is empty and there is no credential
+  /// left to spend. Reporting a revocation here fires that alert for a damaged file on a single
+  /// device and sends whoever answers it looking for a server-side event that never happened.
+  /// `.invalidToken` is the honest answer and the one the Kotlin, Flutter and React Native SDKs
+  /// already give.
+  ///
+  /// The code is `unusable_grant` rather than `no_grant` because the two states want different
+  /// things looked at: `no_grant` is a user who has not authorized, and this is local storage that
+  /// kept half a grant. Both are terminal for the caller, and the remedy for both is `authorize()`.
+  ///
+  /// Nothing is erased, which is the other half of the correction. The old shape cleared the record
+  /// as a side effect of routing through `refreshTokens(…)`, so a second call answered `no_grant`
+  /// and a partner debugging the first report found a store that no longer held what the report was
+  /// about. Reading a damaged record is not a reason to delete it: no sibling SDK deletes it, and
+  /// nothing was spent here that needs consuming. `clearStoredTokens()` and `signOut()` remain the
+  /// ways a grant is dropped, both of them deliberate.
   ///
   /// Ordinary calls pay one `isEmpty` for this and nothing else.
   ///
@@ -569,6 +587,18 @@ public actor TraciveOAuth {
       )
     }
     guard tokens.accessToken.isEmpty else { return tokens.accessToken }
+    // The same test `refreshTokens(…)` applies, deliberately: an empty-string refresh token is as
+    // unrenewable as an absent one, and checking only for `nil` here would hand that record on to
+    // be reported as a revocation nobody performed.
+    guard let refreshToken = tokens.refreshToken, !refreshToken.isEmpty else {
+      throw TraciveError.invalidToken(
+        TraciveErrorInfo(
+          code: "unusable_grant",
+          message: "The stored Tracive grant has a blank access token and no refresh token to "
+            + "renew it with. Call authorize() again."
+        )
+      )
+    }
     // Routed through the ordinary refresh rather than a private one, so this inherits the
     // single-flight guarantee: a blank access token discovered while a refresh is already running
     // waits for that one instead of starting a second, which is exactly what reuse detection
@@ -608,6 +638,11 @@ public actor TraciveOAuth {
     }
     guard let refreshToken = stored.refreshToken, !refreshToken.isEmpty else {
       // An access token with no refresh token cannot be renewed; the grant is over.
+      //
+      // This branch answers for a token the server has already rejected — a 401 brought the caller
+      // here — so a grant that cannot be renewed really is finished, and clearing it is right.
+      // `accessToken()` no longer arrives here: on that path nothing has been sent and nothing
+      // rejected, so it answers `.invalidToken` itself and keeps the record. See there.
       try? tokenStore.clear()
       throw TraciveError.grantRevoked(
         TraciveErrorInfo(

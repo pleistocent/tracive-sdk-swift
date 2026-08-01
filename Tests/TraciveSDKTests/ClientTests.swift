@@ -1006,6 +1006,10 @@ final class ClientTests: XCTestCase {
 
   /// The same damaged record with nothing to renew it. There is no credential left here, so this
   /// is terminal — and it fails without spending a request, exactly as the no-grant path does.
+  ///
+  /// It is reported as `.invalidToken`, not `.grantRevoked`. Nothing reached the server on this
+  /// path, so nothing could have been revoked; saying otherwise sent a partner watching for
+  /// revocation to look for a server-side event that never took place.
   func testABlankStoredAccessTokenWithNoRefreshTokenFailsBeforeAnyNetworkIO() async throws {
     let unusable = TraciveTokens(
       accessToken: "",
@@ -1020,13 +1024,14 @@ final class ClientTests: XCTestCase {
 
     let error = await expectTraciveError { try await client.checkScammer(TestQueries.phone) }
 
-    XCTAssertEqual(error?.kind, .grantRevoked)
+    XCTAssertEqual(error?.kind, .invalidToken)
+    XCTAssertEqual(error?.serverCode, "unusable_grant")
     // Neither the check nor a refresh was attempted: nothing on the wire could have helped.
     XCTAssertEqual(transport.callCount, 0)
     Self.assertNoEmptyBearerReachedTheTransport(transport)
-    // The unusable record is gone, so `isAuthorized` stops claiming a grant and the next call
-    // reports `no_grant` — which is what this record amounted to.
-    XCTAssertNil(try store.load())
+    // The record is left exactly as it was found. Reading damage is not a reason to erase it, and
+    // every subsequent call reports the same thing rather than a second, different failure.
+    XCTAssertEqual(try store.load(), unusable)
   }
 
   // MARK: - Privacy
