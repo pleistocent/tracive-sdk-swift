@@ -73,23 +73,6 @@ final class QueryGrammarTests: XCTestCase {
     return scalar
   }
 
-  // MARK: - Rules landing later in this series
-  //
-  // Fixture v5 added three rules to the shared contract in one bump. They are implemented one
-  // commit at a time, and a rule that has not landed yet would otherwise turn the whole
-  // fixture-driven suite red and hide any *other* regression in it. So each pending entry is named
-  // here explicitly — never skipped by a broad `catch` — and the commit that implements its rule
-  // deletes its line here and adds a dedicated test asserting the exact wire token. Both lists must
-  // be empty, and these two constants deleted, once the series has landed.
-
-  /// `rejected[].id`s whose rejection this SDK does not implement yet.
-  private static let pendingRejectedIds: Set<String> = []
-
-  /// `documentIdGuard.cases[].value`s whose verdict this SDK does not match yet.
-  private static let pendingGuardValues: Set<String> = [
-    "__a\nb__"  // the reserved pattern must not span a line terminator
-  ]
-
   private struct Vector: Decodable {
     let id: String
     let type: String
@@ -233,7 +216,7 @@ final class QueryGrammarTests: XCTestCase {
 
     // Every reason the fixture uses must exist in the Swift enum, and vice versa the enum must not
     // silently rename one.
-    for entry in fixture.rejected where !Self.pendingRejectedIds.contains(entry.id) {
+    for entry in fixture.rejected {
       XCTAssertNotNil(
         QueryRejectionReason(rawValue: entry.reason),
         "rejected[\(entry.id)] uses reason '\(entry.reason)', which has no QueryRejectionReason case"
@@ -266,7 +249,7 @@ final class QueryGrammarTests: XCTestCase {
     let fixture = try loadFixture()
     var checked = 0
 
-    for entry in fixture.rejected where !Self.pendingRejectedIds.contains(entry.id) {
+    for entry in fixture.rejected {
       do {
         let query = try buildQuery(type: entry.type, input: entry.input)
         XCTFail(
@@ -285,11 +268,7 @@ final class QueryGrammarTests: XCTestCase {
       }
     }
 
-    XCTAssertEqual(
-      checked,
-      fixture.rejected.count - Self.pendingRejectedIds.count,
-      "not every rejected input was asserted"
-    )
+    XCTAssertEqual(checked, fixture.rejected.count, "not every rejected input was asserted")
   }
 
   /// The NFC rule, asserted on bytes so it cannot pass by accident.
@@ -642,7 +621,7 @@ final class QueryGrammarTests: XCTestCase {
     let fixture = try loadFixture()
     XCTAssertFalse(fixture.documentIdGuard.cases.isEmpty)
 
-    for entry in fixture.documentIdGuard.cases where !Self.pendingGuardValues.contains(entry.value) {
+    for entry in fixture.documentIdGuard.cases {
       if entry.safe {
         XCTAssertNoThrow(
           try DocumentIdGuard.validate(entry.value),
@@ -696,23 +675,56 @@ final class QueryGrammarTests: XCTestCase {
     XCTAssertFalse(illFormed.unicodeScalars.contains { (0xD800...0xDFFF).contains($0.value) })
   }
 
-  /// `matchesReservedPattern` is knowingly stricter than the server's `^__.*__$`, because
-  /// JavaScript's `.` does not match a newline — so `"__a\nb__"` is accepted server-side and
-  /// rejected here (verified by running that regex). Pinned so the divergence stays a recorded
-  /// decision, including its direction: over-rejection costs nothing, whereas accepting a key the
-  /// server refuses costs a credit on a request that cannot hit.
-  func testReservedPatternIsStricterThanTheServerAcrossANewline() throws {
-    XCTAssertThrowsError(try DocumentIdGuard.validate("__a\nb__")) { error in
-      XCTAssertEqual((error as? TraciveQueryError)?.reason, .invalidDocumentId)
+  /// The reserved-key rule is `^__.*__$`, and that pattern does **not** span a line terminator.
+  ///
+  /// The server's regex carries no `s` flag, so `.` matches anything except a line terminator, and
+  /// `^`/`$` anchor at the string's ends (there is no `m` flag either, so `$` does not match before
+  /// a trailing newline). Every expectation below was taken from running that literal regex, not
+  /// reasoned about: a guard written as `hasPrefix("__") && hasSuffix("__")` is stricter than the
+  /// server and rejects keys it would have accepted.
+  func testReservedPatternDoesNotSpanALineTerminator() {
+    // Line terminators, so `.*` cannot cover the middle → not reserved → the server accepts these.
+    let accepted = [
+      "__a\nb__",  // LF, the fixture's own case
+      "__\n__",
+      "__a\rb__",  // CR
+      "__a\u{2028}b__",  // LINE SEPARATOR
+      "__a\u{2029}b__",  // PARAGRAPH SEPARATOR
+      "__a__\n__",  // `.*` would have to cover "a__\n"
+      "__ab__\n",  // `$` does not match before a trailing newline without `m`
+      "\n__ab__",
+      "___",  // three underscores are too few for `__` + `.*` + `__`
+    ]
+    for id in accepted {
+      XCTAssertNoThrow(
+        try DocumentIdGuard.validate(id),
+        "'\(id.debugDescription)' is not reserved server-side and must not be rejected here"
+      )
     }
 
-    // …and it is unreachable through a builder, for a different reason than one might guess: the
-    // guard runs on the *folded key*, which every builder prefixes with its kind. So the string
-    // handed to the guard starts with "USERNAME_", never with "__", and can never match the
-    // reserved pattern however the caller's input is shaped.
+    // U+0085 NEL is *not* a JavaScript line terminator, though ICU (and so `NSRegularExpression`)
+    // treats it as one. A guard built on Foundation's regex would wrongly accept this.
+    let reserved = ["__proto__", "____", "__a b__", "__a\u{0085}b__"]
+    for id in reserved {
+      XCTAssertThrowsError(
+        try DocumentIdGuard.validate(id),
+        "'\(id.debugDescription)' matches ^__.*__$ and must be rejected"
+      ) { error in
+        XCTAssertEqual((error as? TraciveQueryError)?.reason, .invalidDocumentId)
+      }
+    }
+  }
+
+  /// None of the reserved-pattern cases is reachable through a builder, for a subtler reason than
+  /// one might guess: the guard runs on the *folded key*, which every builder prefixes with its
+  /// kind. The string handed to the guard starts with `USERNAME_`, `BANK_` and so on — never with
+  /// `__` — so it cannot match the reserved pattern however the caller's input is shaped. Not
+  /// because folding strips newlines: an interior newline survives the fold, as asserted here.
+  func testReservedPatternIsUnreachableThroughABuilder() throws {
     let query = try TraciveQuery.username(platform: "TELEGRAM", handle: "__a\nb__")
     XCTAssertTrue(query.searchQueryIndex.hasPrefix("USERNAME_TELEGRAM_"))
     XCTAssertFalse(query.searchQueryIndex.hasPrefix("__"))
+    XCTAssertTrue(query.searchQueryIndex.contains("\n"), "the fold must not strip an inner newline")
     XCTAssertNoThrow(try DocumentIdGuard.validate(query.searchQueryIndex))
   }
 

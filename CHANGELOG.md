@@ -22,6 +22,20 @@ source compatibility until the API freezes at 1.0.
   under-rejecting costs at most one miss. An empty value keeps its own `empty_value` reason, so the
   two mistakes stay distinguishable to a caller.
 
+- **The reserved-key guard was stricter than the server, across a line terminator.** The API
+  reserves keys matching `^__.*__$`. That pattern carries no `s` flag, so `.` does not match a line
+  terminator and `.*` cannot cover a middle containing one — `"__a\nb__"` is a key the server
+  accepts. `DocumentIdGuard` implemented the rule as `hasPrefix("__") && hasSuffix("__")` and
+  rejected it. The guard now matches the pattern's real semantics, including that `$` does not
+  match before a trailing newline (no `m` flag either) and that U+0085 NEL is *not* a JavaScript
+  line terminator even though ICU, and therefore `NSRegularExpression`, treats it as one.
+
+  Previously recorded as a deliberate divergence, on the argument that over-rejection is the cheap
+  direction and no builder can reach the branch anyway — the guard runs on the folded key, which
+  every builder prefixes with its kind, so it never begins with `__`. That still holds, and no
+  caller-visible behaviour changes because of it; the rule is corrected because three SDKs quietly
+  disagreeing with the contract they all vendor is the more expensive kind of wrong.
+
 - **`detail: .full` used the cache, and was wrong in both directions.** It now neither reads nor
   writes it. Two independent defects, one rule.
 
