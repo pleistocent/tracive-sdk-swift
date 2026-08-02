@@ -1,6 +1,6 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 5,
+  "version": 6,
   "countryCount": 245,
   "vectors": [
     {
@@ -116,6 +116,12 @@
       "input": "0857​1860​9079",
       "expected": "+6285718609079",
       "note": "zero-width space di tengah nomor diabaikan seperti spasi biasa"
+    },
+    {
+      "country": "  IDN  ",
+      "input": "0857 1860 9079",
+      "expected": "+6285718609079",
+      "note": "spasi ASCII di sekeliling kode negara tetap dipangkas"
     }
   ],
   "rejected": [
@@ -196,6 +202,12 @@
       "input": "1",
       "reason": "empty_phone_number",
       "note": "idem, trunk prefix NANP"
+    },
+    {
+      "country": "﻿IDN",
+      "input": "0857 1860 9079",
+      "reason": "unknown_country",
+      "note": "BOM di depan kode negara ditolak keempat SDK. Sebelumnya trim() bawaan tiap bahasa tidak sepakat: Dart dan JavaScript membuang U+FEFF, Kotlin dan Swift tidak, sehingga satu input berperilaku dua cara"
     }
   ],
   "countries": [

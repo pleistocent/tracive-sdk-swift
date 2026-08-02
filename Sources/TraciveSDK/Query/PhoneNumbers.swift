@@ -48,7 +48,7 @@ public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: Str
   // A third, quieter one: emptiness is re-checked *after* the trunk prefix is stripped, so `000`,
   // `62` and `1` are refused. The app folds those to `+62` and `+1`, which cannot match any record,
   // so this belongs with the first kind — safe, not stricter.
-  if phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("+"),
+  if trimmedCanonically(phoneNumber).hasPrefix("+"),
     !digits.hasPrefix(dialCode)
   {
     throw TraciveQueryError(.countryConflict)
@@ -89,7 +89,7 @@ public func normalizePhoneNumber(_ country: Country, _ phoneNumber: String) thro
 
 /// Alpha-3 in, dial code out; or digits in, the same digits out.
 private func resolveDialCode(_ countryOrDialCode: String) throws -> String {
-  let trimmed = countryOrDialCode.trimmingCharacters(in: .whitespacesAndNewlines)
+  let trimmed = trimmedCanonically(countryOrDialCode)
   if trimmed.isEmpty { throw TraciveQueryError(.emptyCountry) }
 
   let digits = asciiDigits(of: trimmed)
@@ -112,4 +112,23 @@ private func resolveDialCode(_ countryOrDialCode: String) throws -> String {
 /// `+6285718609079`: one person, two record keys, no error, and the miss still billed.
 private func asciiDigits(of value: String) -> String {
   String(String.UnicodeScalarView(value.unicodeScalars.filter { $0.value >= 48 && $0.value <= 57 }))
+}
+
+/// The characters trimmed from a country or dial code, defined here rather than delegated.
+///
+/// Not `trimmingCharacters(in: .whitespacesAndNewlines)`.
+///
+/// ASCII whitespace only, and deliberately **not** U+FEFF. A byte-order mark inside a data value
+/// is an encoding fault upstream; swallowing it here would tell a partner their pipeline is clean
+/// while the same mark waits to land in a phone number or an account id, where nothing trims it
+/// and the key comes out wrong. Each platform's own trim() disagrees about this — Kotlin's follows
+/// Unicode White_Space plus U+FEFF, JavaScript's strips a different set — which made one input
+/// behave two ways across the four SDKs.
+private let trimmedScalars: Set<Unicode.Scalar> = [" ", "\t", "\n", "\u{0B}", "\u{0C}", "\r"]
+
+private func trimmedCanonically(_ value: String) -> String {
+  var scalars = Array(value.unicodeScalars)
+  while let first = scalars.first, trimmedScalars.contains(first) { scalars.removeFirst() }
+  while let last = scalars.last, trimmedScalars.contains(last) { scalars.removeLast() }
+  return String(String.UnicodeScalarView(scalars))
 }

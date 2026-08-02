@@ -1017,6 +1017,8 @@ public enum Country: String, CaseIterable, Hashable, Sendable {
 
   /// The country with this ISO 3166-1 alpha-3 code, case-insensitively, or nil.
   public static func fromAlpha3(_ alpha3: String) -> Country? {
-    Country(rawValue: alpha3.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
+    Country(
+      rawValue: alpha3.trimmingCharacters(in: CharacterSet(charactersIn: " \t\n\u{0B}\u{0C}\r"))
+        .uppercased())
   }
 }
