@@ -1,127 +1,127 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 6,
+  "version": 7,
   "countryCount": 245,
   "vectors": [
     {
       "country": "IDN",
       "input": "0857-1860-9079",
       "expected": "+6285718609079",
-      "note": "gaya lokal Indonesia: trunk prefix 0 dibuang"
+      "note": "Indonesian local style: the trunk prefix 0 is dropped"
     },
     {
       "country": "+62",
       "input": "0857 1860 9079",
       "expected": "+6285718609079",
-      "note": "dial code dengan +, hasil identik dengan alpha-3"
+      "note": "dial code with +, identical result to the alpha-3 form"
     },
     {
       "country": "62",
       "input": "085718609079",
       "expected": "+6285718609079",
-      "note": "dial code tanpa +, hasil identik"
+      "note": "dial code without +, identical result"
     },
     {
       "country": "idn",
       "input": "0857 1860 9079",
       "expected": "+6285718609079",
-      "note": "alpha-3 tidak peka huruf besar-kecil"
+      "note": "alpha-3 is case-insensitive"
     },
     {
       "country": "IDN",
       "input": "+62 857 1860 9079",
       "expected": "+6285718609079",
-      "note": "pemanggil sudah mengirim E.164; kode negara tidak diduplikasi"
+      "note": "the caller already passed E.164; the country code is not doubled"
     },
     {
       "country": "IDN",
       "input": "0062857 1860 9079",
       "expected": "+6285718609079",
-      "note": "prefix internasional 00 dibuang"
+      "note": "the 00 international prefix is dropped"
     },
     {
       "country": "IDN",
       "input": "8571860907",
       "expected": "+628571860907",
-      "note": "tanpa trunk prefix sama sekali"
+      "note": "no trunk prefix at all"
     },
     {
       "country": "USA",
       "input": "(555) 123-4567",
       "expected": "+15551234567",
-      "note": "NANP tanpa trunk prefix"
+      "note": "NANP without a trunk prefix"
     },
     {
       "country": "USA",
       "input": "1 555 123 4567",
       "expected": "+15551234567",
-      "note": "NANP dengan trunk prefix 1, 11 digit"
+      "note": "NANP with trunk prefix 1, 11 digits"
     },
     {
       "country": "CAN",
       "input": "1 604 555 0199",
       "expected": "+16045550199",
-      "note": "dial code sama dengan USA, hasil sama"
+      "note": "same dial code as the USA, same result"
     },
     {
       "country": "ITA",
       "input": "06 1234 5678",
       "expected": "+390612345678",
-      "note": "Italia: 0 adalah bagian nomor, TIDAK dibuang"
+      "note": "Italy: the 0 is part of the number and is NOT dropped"
     },
     {
       "country": "SMR",
       "input": "0549 123456",
       "expected": "+3780549123456",
-      "note": "San Marino mengikuti aturan Italia"
+      "note": "San Marino follows Italy's rule"
     },
     {
       "country": "RUS",
       "input": "8 912 345 67 89",
       "expected": "+79123456789",
-      "note": "Rusia: trunk prefix 8 pada 11 digit"
+      "note": "Russia: trunk prefix 8 on 11 digits"
     },
     {
       "country": "KAZ",
       "input": "8 701 234 5678",
       "expected": "+77012345678",
-      "note": "Kazakhstan berbagi dial code 7 dengan Rusia"
+      "note": "Kazakhstan shares dial code 7 with Russia"
     },
     {
       "country": "GBR",
       "input": "07911 123456",
       "expected": "+447911123456",
-      "note": "Inggris: trunk prefix 0"
+      "note": "United Kingdom: trunk prefix 0"
     },
     {
       "country": "DEU",
       "input": "0151 23456789",
       "expected": "+4915123456789",
-      "note": "Jerman: trunk prefix 0"
+      "note": "Germany: trunk prefix 0"
     },
     {
       "country": "+39",
       "input": "06 1234 5678",
       "expected": "+390612345678",
-      "note": "Italia lewat dial code, bukan alpha-3"
+      "note": "Italy via dial code rather than alpha-3"
     },
     {
       "country": "IDN",
       "input": "08571860907️9",
       "expected": "+6285718609079",
-      "note": "digit yang menempel pada variation selector tetap digit. Swift sempat membuangnya karena String.filter beriterasi atas grapheme cluster, bukan skalar — satu orang jadi dua record key"
+      "note": "a digit joined to a variation selector is still a digit. Swift dropped it, because String.filter iterates grapheme clusters rather than scalars — one person, two record keys"
     },
     {
       "country": "IDN",
       "input": "0857​1860​9079",
       "expected": "+6285718609079",
-      "note": "zero-width space di tengah nomor diabaikan seperti spasi biasa"
+      "note": "a zero-width space inside the number is ignored like any other space"
     },
     {
       "country": "  IDN  ",
       "input": "0857 1860 9079",
       "expected": "+6285718609079",
-      "note": "spasi ASCII di sekeliling kode negara tetap dipangkas"
+      "note": "ASCII spaces around the country code are still trimmed"
     }
   ],
   "rejected": [
@@ -129,85 +129,115 @@
       "country": "IDN",
       "input": "   ",
       "reason": "empty_phone_number",
-      "note": "nomor kosong setelah sanitasi"
+      "note": "empty number once punctuation is stripped"
     },
     {
       "country": "IDN",
       "input": "abc-def",
       "reason": "empty_phone_number",
-      "note": "tidak ada digit sama sekali"
+      "note": "no digits at all"
     },
     {
       "country": "",
       "input": "0857123456",
       "reason": "empty_country",
-      "note": "country/dial code kosong"
+      "note": "empty country or dial code"
     },
     {
       "country": "XXX",
       "input": "0857123456",
       "reason": "unknown_country",
-      "note": "alpha-3 tidak dikenal"
+      "note": "unknown alpha-3 code"
     },
     {
       "country": "ID",
       "input": "0857123456",
       "reason": "unknown_country",
-      "note": "alpha-2 ditolak; SDK memakai alpha-3"
+      "note": "alpha-2 is refused; this SDK speaks alpha-3"
     },
     {
       "country": "IDN",
       "input": "+64857-1860-9079",
       "reason": "country_conflict",
-      "note": "nomor internasional +64 bertentangan dengan negara yang disebut; menebak menghasilkan kunci yang tak akan pernah cocok dan tetap ditagih"
+      "note": "an international +64 number contradicts the country named; guessing which is right yields a key that can never match, and the miss is billed anyway"
     },
     {
       "country": "USA",
       "input": "+44 7911 123456",
       "reason": "country_conflict",
-      "note": "idem, lewat alpha-3 lain"
+      "note": "same, through a different alpha-3"
     },
     {
       "country": "+62",
       "input": "+64 857 1860 9079",
       "reason": "country_conflict",
-      "note": "idem, lewat dial code"
+      "note": "same, through a dial code"
     },
     {
       "country": "IDN",
       "input": "+0062 857 1860 9079",
       "reason": "country_conflict",
-      "note": "'+' dan '00' adalah dua ejaan yang saling menggantikan, bukan yang bisa ditumpuk: yang mengikuti '+' harus kode negara, dan '00' bukan kode negara mana pun. Ini divergensi KEDUA yang disengaja dari aplikasi Tracive, yang menerimanya"
+      "note": "'+' and '00' are alternative spellings of the same thing, not stackable ones: what follows '+' must be a country code, and '00' is none. This is the one deliberate divergence where the Tracive app accepts the input and these SDKs do not"
     },
     {
       "country": "+62",
       "input": "+0062857 1860 9079",
       "reason": "country_conflict",
-      "note": "idem, lewat dial code"
+      "note": "same, through a dial code"
     },
     {
       "country": "IDN",
       "input": "000",
       "reason": "empty_phone_number",
-      "note": "kosong setelah trunk prefix dibuang. Aplikasi melipatnya jadi '+62' — kunci yang tidak mungkin cocok, jadi menolaknya di sini aman"
+      "note": "empty once the trunk prefix is stripped. The app folds it to '+62', a key that cannot match anything, so refusing it here is safe"
     },
     {
       "country": "IDN",
       "input": "62",
       "reason": "empty_phone_number",
-      "note": "hanya kode negara, tanpa nomor. Aplikasi melipatnya jadi '+62'"
+      "note": "country code only, no subscriber number. The app folds it to '+62'"
     },
     {
       "country": "USA",
       "input": "1",
       "reason": "empty_phone_number",
-      "note": "idem, trunk prefix NANP"
+      "note": "same, NANP trunk prefix"
     },
     {
       "country": "﻿IDN",
       "input": "0857 1860 9079",
       "reason": "unknown_country",
-      "note": "BOM di depan kode negara ditolak keempat SDK. Sebelumnya trim() bawaan tiap bahasa tidak sepakat: Dart dan JavaScript membuang U+FEFF, Kotlin dan Swift tidak, sehingga satu input berperilaku dua cara"
+      "note": "a BOM before the country code is refused by all four SDKs. Each platform's own trim() disagreed: Dart and JavaScript strip U+FEFF, Kotlin and Swift do not, so one input behaved two ways"
+    },
+    {
+      "country": "ITA",
+      "input": "0000000",
+      "reason": "empty_phone_number",
+      "note": "a number that is nothing but zeros. Italy does not strip leading zeros, so this used to yield +390000000 — well-formed E.164 that reached the network and was billed for a miss"
+    },
+    {
+      "country": "ITA",
+      "input": "+39 0000000",
+      "reason": "empty_phone_number",
+      "note": "same, already international; the check must run AFTER the country code is stripped"
+    },
+    {
+      "country": "USA",
+      "input": "0000000000",
+      "reason": "empty_phone_number",
+      "note": "NANP does not strip leading zeros either"
+    },
+    {
+      "country": "RUS",
+      "input": "00000000000",
+      "reason": "empty_phone_number",
+      "note": "same for Russia"
+    },
+    {
+      "country": "IDN",
+      "input": "0000",
+      "reason": "empty_phone_number",
+      "note": "most countries strip the zeros, so the emptiness check already caught this — pinned so the reason is the same in every country"
     }
   ],
   "countries": [
@@ -1927,5 +1957,5 @@
       "countryName": "Zimbabwe"
     }
   ],
-  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. THREE rules deliberately diverge from the Tracive app's normalizer, and they are not the same kind of thing:\n1. A dial code that disagrees with the country named is refused. Every input this rejects produced an unusable key in the app too — safe.\n2. Emptiness is re-checked AFTER the trunk prefix is stripped, so '000', '62' and '1' are refused. The app folds these to '+62' and '+1', which cannot match any record — safe, same as (1).\n3. '+00<dial>' is refused. The app DOES accept this form and folds it correctly, so here the SDKs are stricter than the app on an input the app handles. That is the intended trade: what follows '+' must be a country code, '00' is none, and admitting one malformed concatenation has no principled stopping point ('+000062', '++62')."
+  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. THREE rules deliberately diverge from the Tracive app's normalizer, and they are not the same kind of thing:\n1. A dial code that disagrees with the country named is refused. Every input this rejects produced an unusable key in the app too — safe.\n2. Emptiness is re-checked AFTER the trunk prefix is stripped, so '000', '62' and '1' are refused. The app folds these to '+62' and '+1', which cannot match any record — safe, same as (1).\n3. '+00<dial>' is refused. The app DOES accept this form and folds it correctly, so here the SDKs are stricter than the app on an input the app handles. That is the intended trade: what follows '+' must be a country code, '00' is none, and admitting one malformed concatenation has no principled stopping point ('+000062', '++62').\n4. A number that is nothing but zeros is refused. Most countries' trunk rule strips the zeros and rule 2 catches it, but Italy, San Marino, North America and Russia keep leading zeros, so '+390000000' used to survive, match E.164, reach the network and be billed for a miss. The app folds it the same way, so this is a safe divergence like 1 and 2 — no number that works today folds differently."
 }
