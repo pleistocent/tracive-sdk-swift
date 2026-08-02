@@ -2,7 +2,8 @@ import Foundation
 
 /// Why a query could not be built.
 ///
-/// The raw values are the exact `reason` strings from `query-grammar-vectors.json`, which is the
+/// The raw values are the exact `reason` strings from `query-grammar-vectors.json` — or, for the
+/// four `normalizePhoneNumber` reasons, from `phone-normalization-vectors.json` — which is the
 /// cross-language anti-drift contract: Kotlin, Flutter, Swift and the backend all use these
 /// spellings.
 public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
@@ -13,6 +14,16 @@ public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
   /// Country must be ISO 3166-1 **alpha-3**. The server would up-convert alpha-2, but then the
   /// local cache key would no longer match the server's key.
   case countryNotAlpha3 = "country_not_alpha3"
+  /// `normalizePhoneNumber` was given a country or dial code with no letters and no digits.
+  case emptyCountry = "empty_country"
+  /// Something that looks like a country code but names no country. An alpha-2 code such as `ID`
+  /// lands here: this SDK uses alpha-3 everywhere.
+  case unknownCountry = "unknown_country"
+  /// `normalizePhoneNumber` was given a number with no digits, or one that was only a trunk prefix.
+  case emptyPhoneNumber = "empty_phone_number"
+  /// The number carries a `+` whose dial code disagrees with the country named. Both cannot be
+  /// right, and guessing which is would produce a key that can never match — billed as a miss.
+  case countryConflict = "country_conflict"
   /// Empty account id. The write path drops rows with an empty account id, so such a key can never
   /// hit.
   case emptyAccountId = "empty_account_id"
@@ -63,6 +74,16 @@ public struct TraciveQueryError: Error, Equatable, Hashable, Sendable, CustomStr
       return "Phone numbers must be in E.164 form, e.g. +6281234567891."
     case .countryNotAlpha3:
       return "Country must be an ISO 3166-1 alpha-3 code, e.g. IDN."
+    case .emptyCountry:
+      return "A country or dial code is required, e.g. IDN or +62."
+    case .unknownCountry:
+      return "No country has that code. Use ISO 3166-1 alpha-3, e.g. IDN rather than ID."
+    case .emptyPhoneNumber:
+      return "The phone number has no digits."
+    case .countryConflict:
+      return
+        "The number already carries a dial code that disagrees with the country given. Pass the "
+        + "country the number actually belongs to, or drop the country and pass its own dial code."
     case .emptyAccountId:
       return "The account number is empty."
     case .emptyBankCode:
