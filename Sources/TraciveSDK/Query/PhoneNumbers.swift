@@ -44,7 +44,9 @@ public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: Str
   // folds it correctly, so here the SDK is genuinely stricter. That is the intended trade: `+` and
   // `00` are alternative spellings, not stackable ones; what follows `+` must be a country code,
   // and `00` is none. An earlier version of this comment claimed the first reason covered both.
-  if phoneNumber.contains("+"), !digits.hasPrefix(dialCode) {
+  if phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("+"),
+    !digits.hasPrefix(dialCode)
+  {
     throw TraciveQueryError(.countryConflict)
   }
 

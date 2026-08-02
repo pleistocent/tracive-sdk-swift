@@ -7,6 +7,41 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- **`normalizePhoneNumber`, so a locally-formatted number can reach `phone()`.** `phone()` takes
+  E.164 and refuses `081234567891`, for a reason it states: the SDK cannot know your dial code, and a
+  wrong guess still costs a credit. This supplies the missing dial code, so the strictness downstream
+  stays intact rather than being loosened.
+
+  ```
+  phone(normalizePhoneNumber("IDN", "0857-1860-9079"))   // +6285718609079
+  phone(normalizePhoneNumber("+62", "0857 1860 9079"))   // the same key
+  ```
+
+  The first argument is an ISO 3166-1 **alpha-3** code or a dial code with or without `+`, told apart
+  by shape: letters mean alpha-3, digits mean a dial code. Alpha-2 (`ID`) is refused, because alpha-3
+  is what `bankAccount()` already speaks and one code meaning two things is how a cache key stops
+  matching. A country table of 245 entries comes with it.
+
+  It is public and standalone rather than folded into `phone()`, because you need the E.164 form for
+  your own records, logging and outbound messaging too.
+
+  The rules copy the Tracive app's normalizer deliberately — Italy's leading zero is part of the
+  number, Russia's trunk prefix is `8`, North America's is `1`, everywhere else it is `0` — because
+  if the app folds a number one way and this SDK another, one person becomes two record keys and a
+  report filed in the app is invisible to a check made here. `phone-normalization-vectors.json` pins
+  that agreement, carries the country table so the enum cannot drift either, and is vendored
+  byte-identically into all four SDK repositories with a hash pin in each CI.
+
+  **Two rules deliberately do not match the app**, and they differ in kind. A leading `+` whose dial
+  code contradicts the country named raises `country_conflict` rather than being concatenated —
+  `("IDN", "+64857…")` would otherwise yield `+626485718609079`, a New Zealand number wearing an
+  Indonesian dial code; every input this rejects produced an unusable key in the app too. And
+  `+00<dial>` is refused, which the app accepts and folds correctly: `+` and `00` are alternative
+  spellings of the same thing rather than stackable ones, what follows `+` must be a country code,
+  and `00` is none.
+
 ### Breaking
 
 - **`partnerUserId` is now required, and a blank one is refused.**
