@@ -1,6 +1,6 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 4,
+  "version": 5,
   "countryCount": 245,
   "vectors": [
     {
@@ -178,6 +178,24 @@
       "input": "+0062857 1860 9079",
       "reason": "country_conflict",
       "note": "idem, lewat dial code"
+    },
+    {
+      "country": "IDN",
+      "input": "000",
+      "reason": "empty_phone_number",
+      "note": "kosong setelah trunk prefix dibuang. Aplikasi melipatnya jadi '+62' — kunci yang tidak mungkin cocok, jadi menolaknya di sini aman"
+    },
+    {
+      "country": "IDN",
+      "input": "62",
+      "reason": "empty_phone_number",
+      "note": "hanya kode negara, tanpa nomor. Aplikasi melipatnya jadi '+62'"
+    },
+    {
+      "country": "USA",
+      "input": "1",
+      "reason": "empty_phone_number",
+      "note": "idem, trunk prefix NANP"
     }
   ],
   "countries": [
@@ -1897,5 +1915,5 @@
       "countryName": "Zimbabwe"
     }
   ],
-  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. Two rules follow, and both are deliberate divergences from the Tracive app's normalizer:\n1. A dial code that disagrees with the country named is refused rather than concatenated. Every input this rejects produced an unusable key in the app too.\n2. '+00<dial>' is refused. '+' and '00' are alternative spellings of the same thing, not stackable; what follows '+' must be a country code, and '00' is none. The app DOES accept this form and folds it correctly — so unlike rule 1, this SDK is stricter than the app on an input the app handles. That is the intended trade: the stored key is 'PHONE_+<dial><number>', and admitting one malformed concatenation has no principled stopping point ('+000062', '++62')."
+  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. THREE rules deliberately diverge from the Tracive app's normalizer, and they are not the same kind of thing:\n1. A dial code that disagrees with the country named is refused. Every input this rejects produced an unusable key in the app too — safe.\n2. Emptiness is re-checked AFTER the trunk prefix is stripped, so '000', '62' and '1' are refused. The app folds these to '+62' and '+1', which cannot match any record — safe, same as (1).\n3. '+00<dial>' is refused. The app DOES accept this form and folds it correctly, so here the SDKs are stricter than the app on an input the app handles. That is the intended trade: what follows '+' must be a country code, '00' is none, and admitting one malformed concatenation has no principled stopping point ('+000062', '++62')."
 }
