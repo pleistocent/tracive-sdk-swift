@@ -30,8 +30,14 @@ step and every user looks like they do not have the app installed.
 <key>LSApplicationQueriesSchemes</key>
 <array>
   <string>tracive</string>
+  <string>tracivedev</string>
 </array>
 ```
+
+Both schemes, not just the first. `TraciveAppPresence.scheme(for:)` follows the environment: against
+`.sandbox` it probes `tracivedev://`, and an app that lists only `tracive` gets `false` from
+`canOpenURL` for a sandbox build that is installed — which routes a tester to an install page for an
+app they are holding.
 
 ## 3. Register your redirect URI as a Universal Link
 
@@ -363,7 +369,7 @@ If you build queries from user input, test the folding: `+62 812-3456-7891`, `+6
 
 ## Checklist before you ship
 
-- [ ] `LSApplicationQueriesSchemes` contains `tracive`
+- [ ] `LSApplicationQueriesSchemes` contains `tracive` **and** `tracivedev`
 - [ ] Redirect URI is a Universal Link with a live `apple-app-site-association`, and matches what is
       registered with Tracive **exactly**
 - [ ] The consent flow does not go through a `WKWebView` anywhere
