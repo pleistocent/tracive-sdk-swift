@@ -108,6 +108,16 @@ jobs:
         # API and lands in all four SDKs together.
         run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/query-grammar-vectors.sha256
 
+      - name: Verify the phone-normalization fixture is unmodified
+        # Same mechanism, same reason. This fixture's expected values came from the Tracive app's own
+        # normalizer, so it is the contract that keeps app and SDK folding one person to one record
+        # key. It shipped on 2 August 2026 with no pin in any repository, and an audit then found the
+        # four SDKs disagreeing on a digit joined to a variation selector — the exact drift a pinned
+        # shared fixture exists to make impossible.
+        #
+        # A red step here is not re-pinned to make it green. A change lands in all four SDKs together.
+        run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/phone-normalization-vectors.sha256
+
       - name: Build
         run: swift build -v
 
