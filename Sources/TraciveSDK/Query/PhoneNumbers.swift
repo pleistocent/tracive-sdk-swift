@@ -38,8 +38,12 @@ public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: Str
   // which one is right is exactly what costs a credit: ("IDN", "+64857…") used to yield
   // +626485718609079, a New Zealand number wearing an Indonesian dial code.
   //
-  // This is the one place this function departs from the Tracive app's normalizer. It is safe to
-  // depart here precisely because every input it rejects produced an unusable key in the app too.
+  // Two deliberate departures from the Tracive app's normalizer live here, and they are not the
+  // same kind of thing. A dial code that disagrees with the country named is safe to reject: every
+  // such input produced an unusable key in the app too. `+00<dial>` is not — the app accepts it and
+  // folds it correctly, so here the SDK is genuinely stricter. That is the intended trade: `+` and
+  // `00` are alternative spellings, not stackable ones; what follows `+` must be a country code,
+  // and `00` is none. An earlier version of this comment claimed the first reason covered both.
   if phoneNumber.contains("+"), !digits.hasPrefix(dialCode) {
     throw TraciveQueryError(.countryConflict)
   }

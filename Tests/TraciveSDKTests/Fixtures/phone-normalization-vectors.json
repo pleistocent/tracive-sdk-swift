@@ -1,6 +1,6 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 3,
+  "version": 4,
   "countryCount": 245,
   "vectors": [
     {
@@ -164,6 +164,18 @@
     {
       "country": "+62",
       "input": "+64 857 1860 9079",
+      "reason": "country_conflict",
+      "note": "idem, lewat dial code"
+    },
+    {
+      "country": "IDN",
+      "input": "+0062 857 1860 9079",
+      "reason": "country_conflict",
+      "note": "'+' dan '00' adalah dua ejaan yang saling menggantikan, bukan yang bisa ditumpuk: yang mengikuti '+' harus kode negara, dan '00' bukan kode negara mana pun. Ini divergensi KEDUA yang disengaja dari aplikasi Tracive, yang menerimanya"
+    },
+    {
+      "country": "+62",
+      "input": "+0062857 1860 9079",
       "reason": "country_conflict",
       "note": "idem, lewat dial code"
     }
@@ -1885,5 +1897,5 @@
       "countryName": "Zimbabwe"
     }
   ],
-  "contract": "A `+` in the input is the caller stating the number is already international. If the dial code that follows disagrees with the country named, both cannot be right, so the SDKs refuse rather than guess. This is the one rule the SDKs do NOT share with the Tracive app: every input it rejects produced an unusable key in the app too, so no number that works today folds differently between them."
+  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. Two rules follow, and both are deliberate divergences from the Tracive app's normalizer:\n1. A dial code that disagrees with the country named is refused rather than concatenated. Every input this rejects produced an unusable key in the app too.\n2. '+00<dial>' is refused. '+' and '00' are alternative spellings of the same thing, not stackable; what follows '+' must be a country code, and '00' is none. The app DOES accept this form and folds it correctly — so unlike rule 1, this SDK is stricter than the app on an input the app handles. That is the intended trade: the stored key is 'PHONE_+<dial><number>', and admitting one malformed concatenation has no principled stopping point ('+000062', '++62')."
 }
