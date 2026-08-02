@@ -206,8 +206,12 @@ third does not spend its budget re-deriving them. Anything that differs across t
   declares the matching `<queries>` entry in its own manifest. Auto-selecting on iOS but not Android
   would be worse than not auto-selecting at all.
 
-- **The pending-authorization window is not configurable here.** Flutter and React Native expose it;
-  this SDK and Swift keep it private, so there is exactly one place the number lives.
+- **The pending-authorization window is configurable everywhere except Swift.** Kotlin, Flutter and
+  React Native all take it as a parameter, so an integration spanning more than one can set the same
+  number in each; Swift refuses on purpose, so there is exactly one place its number lives. Kotlin's
+  parameter is spelled `private val`, which privatises the generated property and not the parameter
+  — an earlier version of this list read that as "not configurable", which Kotlin's own CHANGELOG
+  contradicts.
 
 ## Tests
 
