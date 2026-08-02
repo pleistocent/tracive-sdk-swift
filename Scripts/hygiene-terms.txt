@@ -1,0 +1,60 @@
+# Public-hygiene term list — TRACKED ON PURPOSE.
+#
+# This file used to be an untracked `.hygiene-forbidden`, which meant the `forbidden_token`
+# category was empty on every CI run: a clean checkout cannot contain an untracked file, so the
+# one category advertised as catching internal repository names, design-doc titles, backend
+# symbols and server-side function names could never fire. A check that cannot fail is worse than
+# no check, because it reads as coverage.
+#
+# The rule that made it untracked is still right, and is respected here: NOTHING IN THIS FILE MAY
+# ITSELF BE A DISCLOSURE. Every entry names a shape, a public framework API, a file-layout
+# convention, or a dictionary word of a language. None of them names a Tracive internal anything.
+# If you find yourself wanting to write a real internal name here, that name belongs in the
+# private list instead (see below) — the fact that it cannot be written here is the design
+# working, not a limitation.
+#
+# Format: one entry per line. A bare token is matched case-insensitively as a literal substring;
+# `/pattern/flags` is matched as a regular expression. `#` starts a comment.
+#
+# Every entry must be provably able to fire: `scripts/hygiene-selftest.txt` carries a synthetic
+# line for each one, and `npm run hygiene` refuses to run the scan unless every rule matches its
+# own probe. Adding an entry here without a probe fails the build.
+#
+# A private, environment-specific list may still be supplied out of band in an untracked
+# `.hygiene-forbidden` file, one entry per line in this same format. It is ADDITIVE: it can only
+# catch more, and its absence can no longer silently empty the category.
+
+# ---------------------------------------------------------------------------------------------
+# Server-side function declarations. These are public framework API names from several vendors,
+# so listing them asserts nothing about which one the Tracive API is built on.
+# ---------------------------------------------------------------------------------------------
+/\b(onCall|onRequest|onDocumentCreated|onDocumentUpdated|onDocumentWritten|onDocumentDeleted|onSchedule|onMessagePublished|beforeUserCreated)\s*\(/
+
+# ---------------------------------------------------------------------------------------------
+# A backend source path. A client SDK has no reason to name a server-side file layout.
+# ---------------------------------------------------------------------------------------------
+/\b(functions|server|backend)\/(src|lib|dist)\//
+
+# ---------------------------------------------------------------------------------------------
+# An internal repository name. The suffix convention, not any particular repository.
+# ---------------------------------------------------------------------------------------------
+/\b[A-Za-z0-9]+[A-Za-z0-9._-]*-(backend|internal|infra)\b/
+
+# ---------------------------------------------------------------------------------------------
+# Backend hosting and storage hostnames, which name infrastructure and often a project id too.
+# ---------------------------------------------------------------------------------------------
+/\bgs:\/\/[a-z0-9._-]+/
+/\b[a-z0-9-]+\.(cloudfunctions\.net|appspot\.com|firebaseapp\.com|web\.app)\b/
+
+# ---------------------------------------------------------------------------------------------
+# Internal design-document titles. `RFC` is deliberately absent: this repository legitimately
+# cites IETF RFCs (7636, 8252), and a rule that fires on those would be turned off within a week.
+# ---------------------------------------------------------------------------------------------
+/\b(ADR|PRD|HLD|LLD)[-_ ]?\d{1,4}\b/
+
+# ---------------------------------------------------------------------------------------------
+# Roadmap jargon in a language other than English. Say "phase 1" / "phase 2". These are ordinary
+# Indonesian dictionary words — publishing them discloses nothing beyond the existence of the
+# language.
+# ---------------------------------------------------------------------------------------------
+/\b(tahap|rencana|pengguna|laporan|penipuan|penipu|keamanan|kebutuhan|jadwal|catatan|sasaran|anggaran|kuota|pemeriksaan|rekening)\b/i

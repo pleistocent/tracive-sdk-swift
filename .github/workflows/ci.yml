@@ -108,6 +108,17 @@ jobs:
         # API and lands in all four SDKs together.
         run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/query-grammar-vectors.sha256
 
+      # Public-hygiene scan. This repository's CONTRIBUTING used to say "there is no automated scan
+      # here, which puts it on you and on the reviewer" — and on 2 August 2026 the reviewer (the
+      # author) shipped 39 Indonesian-language fixture notes into four published repositories.
+      # React Native's scanner caught them; the other three took the same file without a word.
+      #
+      # The script proves every rule can still fire before it scans anything, against its own
+      # self-test corpus, and refuses to run if one matches nothing. A check that cannot fail is
+      # worse than no check, because it reads as coverage.
+      - name: Public-hygiene scan
+        run: node Scripts/check-hygiene.js
+
       - name: Verify the phone-normalization fixture is unmodified
         # Same mechanism, same reason. This fixture's expected values came from the Tracive app's own
         # normalizer, so it is the contract that keeps app and SDK folding one person to one record

@@ -254,6 +254,12 @@ Nothing else about a repository is carved out. "This repository's own GitHub pat
 package's public URL and nothing beyond it — not a private repository, not another Tracive
 repository, and not a path with an internal branch, commit or file appended.
 
-There is no automated scan in this repository. That makes it your responsibility and the reviewer's,
-and it makes the diff the place to catch it: read what you wrote as a stranger would, before it is
-public and permanent.
+`node Scripts/check-hygiene.js` scans for all of this, and CI runs it. It proves every one of its
+rules can still fire — against its own self-test corpus — before it scans anything, and refuses to
+run if one matches nothing: a check that cannot fail is worse than no check, because it reads as
+coverage.
+
+It arrived on 2 August 2026, after the author shipped 39 Indonesian-language fixture notes into
+four published repositories. Only React Native had a scanner; it caught them, and the other three
+took the same file without a word. The scan does not replace reading your diff as a stranger
+would — it catches the class of mistake a tired reviewer waves through.

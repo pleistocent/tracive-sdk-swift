@@ -1,0 +1,39 @@
+# Self-test corpus for scripts/check-hygiene.js. Every rule — the built-in ones and every entry in
+# scripts/hygiene-terms.txt — must match at least one line here, or `npm run hygiene` exits
+# non-zero before it scans anything.
+#
+# This exists because the hygiene step previously could not fail for the category it advertised.
+# A detector nobody has watched detect anything is a claim, not a check.
+#
+# Everything below is SYNTHETIC. None of it names a real Tracive repository, document, symbol,
+# host or identifier, and none of it may be changed to something that does.
+#
+# This file and scripts/hygiene-terms.txt are the only two files the scanner skips wholesale.
+
+# --- built-in rules ---
+# backend_commit_sha
+da39a3ee5e6b4b0d3255bfef95601890afd80709
+# infrastructure_vendor
+Persisted to dynamodb by the ingestion worker.
+# internal_collection_path
+const ref = collection('placeholder-name');
+# internal_document_reference
+See the internal design doc for the rollout order.
+# organisation_token
+package com.example.notpleistocent.placeholder
+
+# --- entries from scripts/hygiene-terms.txt ---
+# server-side function declarations
+export const placeholder = onDocumentWritten('a/{b}', handler);
+# backend source path
+Defined in functions/src/placeholder.ts
+# internal repository name
+Cloned from example-placeholder-backend last week.
+# storage bucket URI
+gs://placeholder-bucket/exports
+# backend hosting hostname
+https://placeholder-name.cloudfunctions.net/entrypoint
+# internal design-document title
+Superseded by ADR-014.
+# non-English roadmap jargon
+Rencana rilis tahap dua.
