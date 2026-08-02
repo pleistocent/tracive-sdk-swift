@@ -30,7 +30,7 @@ import Foundation
 ///   `.countryConflict`.
 public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: String) throws -> String {
   let dialCode = try resolveDialCode(countryOrDialCode)
-  var digits = phoneNumber.filter { $0.isASCII && $0.isNumber }
+  var digits = asciiDigits(of: phoneNumber)
   if digits.isEmpty { throw TraciveQueryError(.emptyPhoneNumber) }
 
   // A leading `+` is the caller stating "this is already international". If the code that follows
@@ -82,7 +82,7 @@ private func resolveDialCode(_ countryOrDialCode: String) throws -> String {
   let trimmed = countryOrDialCode.trimmingCharacters(in: .whitespacesAndNewlines)
   if trimmed.isEmpty { throw TraciveQueryError(.emptyCountry) }
 
-  let digits = trimmed.filter { $0.isASCII && $0.isNumber }
+  let digits = asciiDigits(of: trimmed)
   if !digits.isEmpty {
     let stripped = String(digits.drop(while: { $0 == "0" }))
     if stripped.isEmpty { throw TraciveQueryError(.emptyCountry) }
@@ -91,4 +91,15 @@ private func resolveDialCode(_ countryOrDialCode: String) throws -> String {
 
   guard let country = Country.fromAlpha3(trimmed) else { throw TraciveQueryError(.unknownCountry) }
   return country.dialCode
+}
+
+/// The ASCII digits in `value`, per Unicode **scalar**.
+///
+/// Not `filter { $0.isASCII && $0.isNumber }`. `String.filter` yields `Character`s, and a Character
+/// is a grapheme cluster: `"9" + U+FE0F` is one Character whose `isASCII` is false, so that spelling
+/// silently *dropped* the digit. Kotlin iterates chars, Dart code units and JavaScript code points —
+/// all three keep it. This SDK returned `+628571860909` where the other three returned
+/// `+6285718609079`: one person, two record keys, no error, and the miss still billed.
+private func asciiDigits(of value: String) -> String {
+  String(String.UnicodeScalarView(value.unicodeScalars.filter { $0.value >= 48 && $0.value <= 57 }))
 }

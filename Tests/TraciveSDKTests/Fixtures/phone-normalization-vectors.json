@@ -1,6 +1,6 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 2,
+  "version": 3,
   "countryCount": 245,
   "vectors": [
     {
@@ -104,6 +104,18 @@
       "input": "06 1234 5678",
       "expected": "+390612345678",
       "note": "Italia lewat dial code, bukan alpha-3"
+    },
+    {
+      "country": "IDN",
+      "input": "08571860907️9",
+      "expected": "+6285718609079",
+      "note": "digit yang menempel pada variation selector tetap digit. Swift sempat membuangnya karena String.filter beriterasi atas grapheme cluster, bukan skalar — satu orang jadi dua record key"
+    },
+    {
+      "country": "IDN",
+      "input": "0857​1860​9079",
+      "expected": "+6285718609079",
+      "note": "zero-width space di tengah nomor diabaikan seperti spasi biasa"
     }
   ],
   "rejected": [
