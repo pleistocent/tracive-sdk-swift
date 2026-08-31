@@ -128,8 +128,13 @@ Your app must declare the scheme, or `canOpenURL` returns `false` for everyone:
 <key>LSApplicationQueriesSchemes</key>
 <array>
   <string>tracive</string>
+  <string>tracivedev</string>
 </array>
 ```
+
+Both, because the probe follows `environment`: under `.sandbox` it probes `tracivedev://`, and an
+app listing only `tracive` gets `false` for a sandbox build that is installed. See
+`Docs/integration.md`.
 
 When Tracive is not installed the SDK opens the **clean** install link and returns
 `AuthResult.appNotInstalled`:

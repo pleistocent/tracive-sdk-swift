@@ -66,15 +66,15 @@ const TEXT_EXTENSIONS = new Set(['.swift', '.md', '.yml', '.yaml', '.json', '.pl
 // The one allowed exception, and the only permitted matches for the org token.
 //
 // Matched as patterns with a trailing lookahead rather than as plain substrings, because a
-// substring allowance is also a PREFIX allowance: allowing `com.pleistocent.tracive` as a
-// substring silently allowed every id built on top of it, including non-production variants that
-// appear nowhere in shipping code and whose only effect here would be to disclose that they
-// exist. The repository path carries an optional `.git`, which package.json's clone URL has.
+// substring allowance is also a PREFIX allowance. The pattern now takes dotted build-variant
+// suffixes, because withholding the sandbox id protected nothing: every authorize host publishes
+// its own application id and signing fingerprints at /.well-known/assetlinks.json. The lookahead
+// still allows a dotted suffix and nothing else, so an id whose second segment differs is caught. The repository path carries an optional `.git`, which package.json's clone URL has.
 const ALLOWED_PLEISTOCENT_PATTERNS = [
   // The copyright holder in a licence header. Legitimate, and the reason widening this scan to
   // extension-less files surfaced LICENSE on the first run.
   /Copyright \d{4} (?:PT )?Pleistocent(?:[A-Za-z ]*)?(?![A-Za-z0-9._-])/g,
-  /com\.pleistocent\.tracive(?![A-Za-z0-9._-])/g,
+  /com\.pleistocent\.tracive(?:\.[A-Za-z0-9_]+)*(?![A-Za-z0-9._-])/g,
   /github\.com\/pleistocent\/tracive-sdk-swift(\.git)?(?![A-Za-z0-9._-])/g,
   /pleistocent\/tracive-sdk-swift(?![A-Za-z0-9._-])/g,
 ];
@@ -267,8 +267,8 @@ for (const path of walk(ROOT)) {
         line: index + 1,
         code: 'organisation_token',
         detail:
-          'the organisation token appears outside its allowed forms: the Android application id, ' +
-          "and this repository's own GitHub path",
+          'the organisation token appears outside its allowed forms: an Android application id in ' +
+          "the Tracive app's family, and this repository's own GitHub path",
       });
     }
   });

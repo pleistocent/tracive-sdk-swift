@@ -7,6 +7,16 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Docs/oauth.md` showed an `LSApplicationQueriesSchemes` array without the sandbox scheme.**
+  `Docs/integration.md` had it right and explained the failure; the OAuth guide did not, so a reader
+  who followed that one got `false` from `canOpenURL` for a sandbox build that was installed, and
+  every tester was routed to an install page for an app they were holding. No code changed — the
+  probe already follows `environment` — but a wrong snippet in one of two guides is the same bug
+  reaching the reader.
+
+
 ### Added
 
 - **`normalizePhoneNumber`, so a locally-formatted number can reach `phone()`.** `phone()` takes
