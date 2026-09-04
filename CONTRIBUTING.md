@@ -8,6 +8,12 @@ swift test
 macOS only. The package targets iOS 15 / macOS 12 and leans on CryptoKit, Security and the system
 libsqlite3; none of that exists on a Linux runner, so there is no Linux job to keep green.
 
+> **CI is off.** The workflow is set to manual dispatch only, to stop metered Actions minutes on a
+> private repository — see the note at the top of `.github/workflows/ci.yml`, and re-enable it when
+> there is budget. Everything below still describes real gates; the only change is that **nothing
+> runs them for you**. Run `swift build && swift test` before you push, and read the rest of this file as instructions
+> for a human rather than a description of a robot.
+
 ## Read the exit code, not the output
 
 `swift test` prints `Executed N tests, with 0 failures` **once per suite**. A 250-test run emits

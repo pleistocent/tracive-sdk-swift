@@ -3,10 +3,25 @@ name: CI
 # Every unit test in this package runs offline against injected fakes — the Tracive Open API does
 # not exist yet, and no test may depend on a live host. If a job here ever needs network access to
 # go green, something has been wired up wrong.
+
+# ---------------------------------------------------------------------------------------------
+# CI IS OFF — re-enable when there is budget for it.
+#
+# This repository is private, so Actions minutes are metered — and this workflow runs on macOS
+# runners, which bill at a multiple of the Linux rate, so it is the expensive one. Nothing below
+# has been deleted; only the triggers changed. To turn automatic runs back on, restore:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#
+# Until then the gates still exist as commands — they are the `run:` steps below, and every one of
+# them works on a laptop. Run them before pushing, because with this off nothing else will.
+# ---------------------------------------------------------------------------------------------
+
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Manual only, so a run costs something only when someone asks for it. See the note above.
   workflow_dispatch:
 
 concurrency:
