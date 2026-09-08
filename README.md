@@ -95,9 +95,17 @@ import TraciveSDK
 
 let client = TraciveClient(
   mode: .oauth(
+    // TODO(partner): the client id you were issued at registration.
     clientId: "your-client-id",
+    // TODO(partner): a Universal Link on a host you own — an `applinks:` entitlement plus an
+    // apple-app-site-association file on that host. Register it with Tracive too.
     redirectUri: URL(string: "https://yourapp.example.com/oauth/tracive")!,
-    scopes: [TraciveScopes.scammerCheck, TraciveScopes.creditsRead]
+    // TODO(partner): the narrowest set you need. Constants, not strings: the server rejects
+    // the whole consent request when it does not recognise a scope name.
+    scopes: [TraciveScopes.scammerCheck, TraciveScopes.creditsRead],
+    // TODO(partner): your own stable, opaque id for this user. Required and never blank —
+    // never a raw phone number or an email.
+    partnerUserId: "your-user-id"
   ),
   environment: .production
 )
@@ -114,7 +122,8 @@ case .appNotInstalled:
 case .denied:
   return
 case .codeReceived(let code, let codeVerifier, let redirectUri):
-  // Confidential clients only — forward these to your own backend.
+  // TODO(partner): confidential clients only — send these over TLS to your own backend,
+  // which completes the exchange with the client secret. Nowhere else.
   return
 case .failed(let error):
   throw error
