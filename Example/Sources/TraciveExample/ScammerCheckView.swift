@@ -20,8 +20,32 @@ public struct ScammerCheckView: View {
   @StateObject private var model: ScammerCheckModel
 
   /// Builds the screen with the SDK's real cache in front of a canned offline "server".
+  ///
+  /// This initialiser is the demo, not the integration: a real composition root builds a
+  /// `TraciveClient` and passes a `LiveChecker` to `init(checker:)` below.
   public init() {
+    // TODO(partner): replace this whole body with a real client, and use `init(checker:)`:
+    //
+    //   let client = TraciveClient(
+    //     mode: .oauth(
+    //       clientId: "<the client id you were issued>",
+    //       redirectUri: "https://<a host you own>/oauth/callback",
+    //       partnerUserId: "<your own stable, opaque id for this user>",
+    //       scopes: [TraciveScopes.scammerCheck]
+    //     )
+    //   )
+    //   ScammerCheckView(checker: LiveChecker(client: client))
+    //
+    // That redirect needs a Universal Link — an `applinks:` entitlement and an
+    // apple-app-site-association file on the host — and Info.plist needs
+    // `LSApplicationQueriesSchemes` containing `tracive`. Docs/integration.md has both.
+
+    // TODO(partner): `SQLiteCheckCache` on disk, not in memory. A cache that does not survive a
+    // relaunch buys nothing; in-memory here only so the demo leaves nothing behind.
     let cache: any CheckCache = (try? SQLiteCheckCache.inMemory()) ?? NoOpCheckCache()
+    // TODO(partner): both of these go. `SampleChecker` is a canned offline server, and
+    // `CacheFirstChecker` spells out by hand what `Source.cacheFirst` already does inside
+    // `TraciveClient`.
     let sample = SampleChecker()
     let checker = CacheFirstChecker(cache: cache) { try await sample.check($0) }
     _model = StateObject(wrappedValue: ScammerCheckModel(checker: checker))

@@ -22,6 +22,9 @@ public final class ScammerCheckModel: ObservableObject {
   @Published public private(set) var state: ScammerCheckState = .idle
 
   private let checker: any ScammerChecking
+  // TODO(partner): read this from the user's SIM or their profile. A constant is wrong for anyone
+  // outside that one country, and it fails quietly: it builds a valid-looking E.164 number for the
+  // wrong region, which indexes as a different entity, misses, and is billed anyway.
   /// Dial code used to complete a local-format number, e.g. `62` for Indonesia. In a real app this
   /// comes from the user's SIM or their profile, not a constant.
   private let defaultDialCode: String
@@ -94,6 +97,7 @@ public final class ScammerCheckModel: ObservableObject {
   /// `Idempotency-Key` as the original attempt.
   public static func message(for error: TraciveError) -> String {
     switch error {
+    // TODO(partner): send the user into your own top-up flow, not just this sentence.
     case .insufficientCredits:
       return "You are out of Tracive credits. Top up to keep checking."
     case .rateLimited(let retryAfter, _):

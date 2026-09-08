@@ -56,6 +56,15 @@ Use that same seam in your own app. It is what lets you unit-test what your UI d
 402 and for a timeout — none of which you can reliably provoke against a real server, and all of which
 are the cases that matter.
 
+## Using it as your own experiment ground
+
+Everything you have to supply, and every demo shortcut you have to take back
+out, is marked `TODO(partner)`:
+
+```bash
+grep -rn "TODO(partner)" Example
+```
+
 ## Running it as an app
 
 This package is a **library** so that `swift build` can verify it on a Mac without an Xcode project

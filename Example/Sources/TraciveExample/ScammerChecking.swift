@@ -14,7 +14,8 @@ import TraciveSDK
 /// 3. **Proxy mode (phase 2) is a one-line change** at the composition root instead of an edit to
 ///    every view.
 ///
-/// In production the implementation is one line:
+/// In production the implementation is one line, and writing it is the one piece of this file a
+/// partner has to supply:
 ///
 /// ```swift
 /// struct LiveChecker: ScammerChecking {
@@ -68,6 +69,9 @@ public struct CacheFirstChecker: ScammerChecking {
 
 // MARK: - Sample data
 
+// TODO(partner): delete this type. Nothing in a real integration calls it — a `LiveChecker`
+// wrapping `TraciveClient.checkScammer` takes its place. Keep its *shape* in your test target
+// though: it is how you assert what your UI does for HIGH, for NONE and for a 402 with no server.
 /// A stand-in "server" with a handful of canned verdicts, so the example is explorable offline.
 ///
 /// Deliberately slow by a few hundred milliseconds: an instant answer hides the loading state, which
