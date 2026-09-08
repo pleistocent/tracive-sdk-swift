@@ -497,6 +497,37 @@ final class OAuthTests: XCTestCase {
     XCTAssertEqual(error.info?.message, "unknown scope")
   }
 
+  /// The one non-denial code the server actually sends, kept as its own case.
+  ///
+  /// `testOtherCallbackErrorsSurfaceTheRawCode` already covers the mechanism with a stand-in code.
+  /// This pins the code the backend really emits, for the two situations that produce it: the
+  /// partner organisation has not accepted the current terms, and the device has hit its daily
+  /// connection limit to this partner. Neither is a refusal by this user, and a host that reads the
+  /// type instead of the code cannot tell them from one — hence the assertion is on `serverCode`.
+  ///
+  /// The description matters as much as the code: it carries the server's own wording, including
+  /// the reset time, which is what a partner app shows instead of "you declined".
+  func testTemporarilyUnavailableReachesTheHostWithItsCodeAndDescription() async throws {
+    let oauth = makeOAuth()
+    let request = try await oauth.makeAuthorizationRequest()
+
+    let url = Self.callbackURL([
+      "error": "temporarily_unavailable",
+      "error_description": "daily connection limit for this device reached, retry after 00:00 UTC",
+      "state": request.state,
+    ])
+    let result = await oauth.handleCallback(url: url)
+
+    guard case .failed(let error) = result else {
+      return XCTFail("Expected failure, got \(String(describing: result)).")
+    }
+    XCTAssertEqual(error.serverCode, "temporarily_unavailable")
+    XCTAssertEqual(
+      error.info?.message,
+      "daily connection limit for this device reached, retry after 00:00 UTC"
+    )
+  }
+
   func testCallbackWithNeitherCodeNorErrorFails() async throws {
     let oauth = makeOAuth()
     let request = try await oauth.makeAuthorizationRequest()

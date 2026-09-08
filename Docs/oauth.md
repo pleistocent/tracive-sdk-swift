@@ -212,6 +212,40 @@ Two independent reasons, either sufficient:
 If you find yourself adding a web view to "make the redirect work", stop — the redirect URI or the
 `apple-app-site-association` is wrong.
 
+## `access_denied` is not the only refusal
+
+`error=access_denied` is the user saying no, and it is the only code with a typed outcome. Every
+other code reaches you as a failure carrying the raw code:
+
+```swift
+case .failed(let error):
+  if error.serverCode == "temporarily_unavailable" {
+    // Not a refusal by this user. Say "try again later", never "you declined".
+    showRetryLater(error.info?.message)
+  } else {
+    report(error)
+  }
+```
+
+**Branch on the code, not on the error type.** The type is not the same across the Tracive SDKs —
+Kotlin and Swift surface these as their "unknown" error, Flutter and React Native as their
+invalid-request one — and an unrecognised code is deliberately data to pass through rather than a
+case each SDK grows a class for. The code string is identical in all four, and it is the contract.
+
+`temporarily_unavailable` is the one you will actually see. The server sends it for two situations
+that are the same to your app and different to the user:
+
+- **The partner organisation has not accepted the current terms.** Existing grants keep working;
+  only new ones are refused, so this appears to new users and not to the ones you already have.
+- **This device has reached its daily connection limit to your app.** A cap on successful
+  authorizations per device per partner per UTC day, which exists because a free Tracive account
+  gets a monthly credit allowance and one phone could otherwise cycle accounts to farm it.
+
+`error_description` carries the server's own wording, including the reset time where there is one,
+so show that rather than a string of your own. Both cases resolve without you doing anything; the
+user retries later. The attempt is spent either way, so authorizing again starts a fresh one rather
+than resuming.
+
 ## The redirect URI
 
 Must be an HTTPS Universal Link on a domain you control:
