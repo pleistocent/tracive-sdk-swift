@@ -470,6 +470,7 @@ release still reaches you intact.
 | [`Docs/caching.md`](Docs/caching.md) | storage format, encryption, TTLs, threat model |
 | [`Docs/proxy-contract.md`](Docs/proxy-contract.md) | phase 2 Proxy mode, for planning |
 | [`SECURITY.md`](SECURITY.md) | reporting a vulnerability |
+| [`Docs/RELEASING.md`](Docs/RELEASING.md) | cutting a release, and why the tag is the package |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed |
 
 ---
@@ -500,6 +501,10 @@ on the next launch. Do that whenever the payload shape or the encryption format 
 
 SemVer, `0.x` until the API freezes. While the backend is still unreleased, minor versions may make
 breaking changes; they will be listed in `CHANGELOG.md`.
+
+A version is a git tag and nothing else — SwiftPM resolves `from:` against them, so a tag is public
+the moment it is pushed and never moves once it is. Cutting one is a workflow dispatch:
+[`Docs/RELEASING.md`](Docs/RELEASING.md).
 
 ## Licence
 

@@ -24,6 +24,11 @@ on:
   # Manual only, so a run costs something only when someone asks for it. See the note above.
   workflow_dispatch:
 
+  # release.yml runs these same gates before it tags anything. With automatic CI off, a release is
+  # otherwise cut from code nothing has checked — and an SPM tag is the artifact, so there is
+  # nothing to withdraw afterwards.
+  workflow_call:
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
