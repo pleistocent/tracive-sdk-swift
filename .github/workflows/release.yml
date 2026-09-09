@@ -34,10 +34,44 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Releasing is limited to admin and maintain. `workflow_dispatch` already requires write access,
+  # so what this adds is the difference between "anyone who can push" and "someone who owns this
+  # package" — and for an SDK that ships into partner apps those are not the same set.
+  #
+  # A GitHub environment with required reviewers would be the native way to say this, and it is not
+  # available here: environments on a private repository need GitHub Pro or Team, and the
+  # `pleistocent` organisation is on Free. So the rule is a job, and it is the first one.
+  #
+  # It fails closed. GITHUB_TOKEN can read this endpoint with the `contents: read` and
+  # `metadata: read` it already has — checked on a runner rather than assumed — so an API error
+  # here stops the release instead of waving it through.
+  authorize:
+    name: Authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Only a maintainer may cut a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.triggering_actor }}
+          REPO: ${{ github.repository }}
+        run: |
+          role="$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.role_name')"
+          case "$role" in
+            admin|maintain)
+              echo "$ACTOR is '$role' on $REPO"
+              ;;
+            *)
+              echo "::error::$ACTOR is '$role' on $REPO — cutting a release is limited to admin and maintain"
+              exit 1
+              ;;
+          esac
+
   # Everything knowable in the first minute, checked in the first minute — the gates below take
   # twenty minutes of macOS runner, and a version typo should not cost that.
   preflight:
     name: Preflight
+    needs: authorize
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:

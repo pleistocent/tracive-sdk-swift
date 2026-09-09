@@ -1,6 +1,6 @@
 # Releasing the Swift SDK
 
-Anyone with **write** access to this repository can cut a complete release: the gates, the tag and
+A **maintainer** of this repository — `admin` or `maintain`, see [Who can release](#who-can-release) — can cut a complete release: the gates, the tag and
 the GitHub release all come out of one workflow dispatch.
 
 Unlike the sibling SDKs there is nothing to set up first — no registry account, no credentials, no
@@ -54,6 +54,25 @@ Because SwiftPM has nowhere to put one — a package manifest carries no version
 it. The sibling SDKs all cross-check the dispatched version against a manifest
 (`gradle.properties`, `pubspec.yaml`, `package.json`) and this one cannot. `CHANGELOG.md` is the
 only other place the number is written down, so the changelog check is doing double duty here.
+
+## Who can release
+
+The `authorize` job runs first and fails the workflow unless the person who dispatched it is
+`admin` or `maintain` on this repository. `workflow_dispatch` already requires write access, so
+what this adds is the gap between "anyone who can push" and "someone who owns this package" — and
+for an SDK that ships into partner apps, those are not the same set.
+A tag here is live the moment it is pushed, with nothing in between to catch it.
+
+The native way to express this would be a GitHub
+[environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
+with required reviewers, which would also give an approve button. It is not available: environments
+on a **private** repository need GitHub Pro or Team, and the `pleistocent` organisation is on Free.
+If the plan changes, an environment is the better mechanism — it is enforced by GitHub rather than
+by a step, and it survives someone editing the workflow.
+
+Granting a collaborator `maintain` rather than `write` is what makes them a releaser. Both current
+collaborators are `admin`, so the rule changes nothing today; it is there for the first person
+added with `write`.
 
 ## When something goes half-wrong
 
