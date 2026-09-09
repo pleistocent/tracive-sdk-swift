@@ -415,4 +415,16 @@ final class BrokenCache: CheckCache {
   func count() throws -> Int {
     throw CheckCacheError.storageFailure(code: 11, message: "database disk image is malformed")
   }
+
+  func writeTransactionCheck(_ result: CheckResult, for transactionId: String) throws {
+    throw CheckCacheError.storageFailure(code: 13, message: "database or disk is full")
+  }
+
+  func readTransactionCheck(for transactionId: String) throws -> CheckResult? {
+    throw CheckCacheError.storageFailure(code: 11, message: "database disk image is malformed")
+  }
+
+  func removeTransactionCheck(for transactionId: String) throws {
+    throw CheckCacheError.storageFailure(code: 11, message: "database disk image is malformed")
+  }
 }

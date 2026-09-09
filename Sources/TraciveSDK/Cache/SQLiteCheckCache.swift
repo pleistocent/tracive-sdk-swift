@@ -19,6 +19,13 @@ import Foundation
 /// | `fetched_at` | when the server produced the data | yes |
 /// | `expires_at` | prune hint, `fetched_at + TTL` at write time | yes |
 ///
+/// Two kinds of row live in that table, told apart by the shape of the key and by nothing else: a
+/// cached answer under `SHA-256(searchQueryIndex)`, and a transaction record under `txn:` +
+/// `SHA-256(transactionId)`. `:` is not a hex digit, so the key spaces cannot collide, and each kind
+/// authenticates under its own AAD label, so neither can be opened as the other. A plaintext `kind`
+/// column would be the obvious alternative and is exactly what this schema avoids: it would sort a
+/// stolen file into "answers held" and "transfers made" before anyone decrypted a byte.
+///
 /// The two timestamps are plaintext on purpose: pruning must not require decrypting every row, and
 /// this is the whole of what they leak. `expires_at - fetched_at` reveals which per-tier TTL applied,
 /// so an attacker holding the raw file can tell that *some* query resolved to a high-risk tier — but
@@ -193,6 +200,90 @@ public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
     try unlockedRemove(key)
   }
 
+  public func writeTransactionCheck(_ result: CheckResult, for transactionId: String) throws {
+    let key = try Self.recordKey(transactionId)
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard policy.isEnabled else { return }
+
+    // A retention of zero or less means "keep no records", and it takes the ones already written
+    // with it — the same shape as a disabled cache refusing to accumulate rows.
+    guard policy.transactionCheckRetention > 0 else {
+      try? unlockedRemoveRow(key.rowKey)
+      return
+    }
+
+    let record = result.transactionRecordCopy()
+    let payload = try cipher.sealRecord(record, for: key)
+    // Measured from now, not from `fetchedAt`. A cache entry expires when its verdict goes stale, so
+    // it is dated from when the data was produced; a record expires when the host stops wanting the
+    // history, so it is dated from when the history was made.
+    let expiresAt = now().addingTimeInterval(policy.transactionCheckRetention)
+
+    try connection.transaction {
+      let statement = try connection.prepare(
+        """
+        INSERT OR REPLACE INTO check_cache (key, payload, fetched_at, expires_at, written_at)
+        VALUES (?, ?, ?, ?, ?);
+        """
+      )
+      try statement.bind(1, text: key.rowKey)
+      try statement.bind(2, blob: payload)
+      try statement.bind(3, double: record.fetchedAt.timeIntervalSince1970)
+      try statement.bind(4, double: expiresAt.timeIntervalSince1970)
+      try statement.bind(5, double: now().timeIntervalSince1970)
+      try statement.step()
+    }
+
+    _ = try? unlockedEnforceMaxEntries()
+  }
+
+  public func readTransactionCheck(for transactionId: String) throws -> CheckResult? {
+    let key = try Self.recordKey(transactionId)
+
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard policy.isEnabled else { return nil }
+
+    let statement = try connection.prepare(
+      "SELECT payload, expires_at FROM check_cache WHERE key = ? LIMIT 1;"
+    )
+    try statement.bind(1, text: key.rowKey)
+    guard try statement.step() else { return nil }
+    let payload = statement.blob(0)
+    let expiresAt = statement.double(1)
+
+    // Release the cursor before the DELETEs below run on the same connection; see `read`.
+    statement.reset()
+
+    // The row's own `expires_at`, not `policy.isFresh`. Freshness asks whether a verdict is still
+    // worth trusting and is measured from `fetched_at`; retention asks whether the user may still
+    // see what they were told, and a record whose verdict went stale months ago is still the right
+    // answer to that.
+    guard expiresAt > now().timeIntervalSince1970 else {
+      try? unlockedRemoveRow(key.rowKey)
+      return nil
+    }
+
+    do {
+      // No `withOrigin`: the origin this was recorded under is part of what happened.
+      return try cipher.openRecord(payload, for: key)
+    } catch CheckCacheError.payloadUnreadable {
+      try? unlockedRemoveRow(key.rowKey)
+      return nil
+    }
+  }
+
+  public func removeTransactionCheck(for transactionId: String) throws {
+    let key = try Self.recordKey(transactionId)
+    lock.lock()
+    defer { lock.unlock() }
+    try unlockedRemoveRow(key.rowKey)
+  }
+
   public func clear() throws {
     lock.lock()
     defer { lock.unlock() }
@@ -231,9 +322,22 @@ public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
   // MARK: - Unlocked internals (callers already hold `lock`)
 
   private func unlockedRemove(_ key: CheckCacheKey) throws {
+    try unlockedRemoveRow(key.hex)
+  }
+
+  private func unlockedRemoveRow(_ rowKey: String) throws {
     let statement = try connection.prepare("DELETE FROM check_cache WHERE key = ?;")
-    try statement.bind(1, text: key.hex)
+    try statement.bind(1, text: rowKey)
     try statement.step()
+  }
+
+  /// Hashes a transaction id, or throws. Done before the lock is taken: a caller's bad argument
+  /// should not have to queue behind a write to be reported.
+  private static func recordKey(_ transactionId: String) throws -> TransactionRecordKey {
+    guard let key = TransactionRecordKey(transactionId: transactionId) else {
+      throw CheckCacheError.invalidTransactionId
+    }
+    return key
   }
 
   private func unlockedPrune() throws -> Int {

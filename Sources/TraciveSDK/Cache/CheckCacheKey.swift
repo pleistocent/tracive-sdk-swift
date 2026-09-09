@@ -57,6 +57,42 @@ public struct CheckCacheKey: Hashable, Sendable, CustomStringConvertible, Custom
   public var debugDescription: String { description }
 }
 
+/// The row key of a transaction record: `"txn:" + SHA-256(transactionId)`, lowercase hex.
+///
+/// Transaction records share the `check_cache` table with cached answers, and the prefix is the only
+/// thing telling the two apart. A cache key is 64 hex digits and `:` is not a hex digit, so the two
+/// key spaces cannot collide — which is what lets both kinds of row live in one table without a
+/// plaintext `kind` column. Such a column would sort a stolen database file into "answers this
+/// device holds" and "transfers this device made" before anyone had to decrypt a byte.
+///
+/// The id itself is hashed for the same reason an identifier is. A transaction reference is the
+/// host's own string rather than a person's phone number, but in cleartext beside an encrypted
+/// verdict it says *which* transfers a device holds a fraud answer for.
+///
+/// The id is trimmed of surrounding whitespace and otherwise used verbatim, so `TRF-1` and `trf-1`
+/// are two records. A reference format this SDK has never seen is not one it can fold safely.
+struct TransactionRecordKey: Hashable, Sendable, CustomStringConvertible {
+
+  /// Lowercase hex of `SHA-256(trimmed id)`, without the prefix. This is what the AEAD binds.
+  let hex: String
+
+  /// What goes in the `key` column.
+  var rowKey: String { "txn:" + hex }
+
+  /// `nil` for a blank id: the record is looked up by it, and a blank one would file every
+  /// unlabelled transaction under a single shared row.
+  init?(transactionId: String) {
+    let trimmed = transactionId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    var digest = SHA256()
+    digest.update(data: Data(trimmed.utf8))
+    self.hex = digest.finalize().traciveHexString
+  }
+
+  /// Redacted for the same reason `CheckCacheKey`'s is.
+  var description: String { "TransactionRecordKey(<redacted>)" }
+}
+
 extension Digest {
   /// Lowercase hex, allocated once. `%02x` via `String(format:)` per byte is ~20x slower and pulls
   /// in the (locale-sensitive) formatting machinery for no benefit.

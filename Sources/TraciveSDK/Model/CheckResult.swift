@@ -118,6 +118,42 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     )
   }
 
+  /// This result reduced to what may be kept against a transaction.
+  ///
+  /// A transaction record is read back under the transaction it was filed for and never under
+  /// another request, so almost everything survives — including the fields `cacheableCopy()` drops
+  /// for reasons that do not apply here. `checkId` and `billing` describe one call, which is exactly
+  /// what this record is; keeping them is what lets a support agent reconcile the charge and a UI
+  /// say whether that transfer spent a credit. `origin` and `fetchedAt` are kept as they are, not
+  /// restamped, because the record is a statement about a past moment: a second transfer to an
+  /// account already checked was served from the cache, spent nothing, and should say so.
+  ///
+  /// `topChronologies` and `comments` go, and that is the one deliberate loss. They are other
+  /// people's accounts of being defrauded, written in prose; a record lives for months rather than
+  /// hours, and nothing on a transaction-detail screen shows them.
+  public func transactionRecordCopy() -> CheckResult {
+    CheckResult(
+      checkId: checkId,
+      found: found,
+      riskTier: riskTier,
+      reportTotal: reportTotal,
+      credibleReports: credibleReports,
+      ambiguousReports: ambiguousReports,
+      firstReportOn: firstReportOn,
+      lastReportOn: lastReportOn,
+      fraudAmount: fraudAmount,
+      tags: tags,
+      relatedScammerCount: relatedScammerCount,
+      topChronologies: nil,
+      comments: nil,
+      billing: billing,
+      cacheTtlSeconds: cacheTtlSeconds,
+      disclaimer: disclaimer,
+      origin: origin,
+      fetchedAt: fetchedAt
+    )
+  }
+
   /// Returns a copy stamped with a different provenance. The transport layer uses this after
   /// decoding a response, and the cache layer uses it when replaying a stored entry.
   public func withOrigin(_ origin: Origin, fetchedAt: Date? = nil) -> CheckResult {

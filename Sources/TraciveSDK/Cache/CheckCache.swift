@@ -45,10 +45,62 @@ public protocol CheckCache: AnyObject, Sendable {
   /// Implementations must persist `result.cacheableCopy()`, not `result`.
   func write(_ result: CheckResult, for key: CheckCacheKey) throws
 
-  /// Deletes one entry. A key that is not present is not an error.
+  /// Deletes one entry. A key that is not present is not an error. Any transaction record that was
+  /// taken from it is left alone.
   func remove(_ key: CheckCacheKey) throws
 
-  /// Deletes everything. This is what `client.cache.clear()` calls.
+  /// Files `result` as the answer that was shown for `transactionId`.
+  ///
+  /// This is what a transaction-detail screen reads back weeks later — "checked before you sent it,
+  /// no reports found" — and it exists because `read` cannot answer that question. `read` is keyed
+  /// on the identifier and holds whatever the *latest* check said; a transaction detail has to show
+  /// what the user was shown **at the time they decided**, and those two diverge the moment the same
+  /// account is checked again.
+  ///
+  /// Three differences from `write`, all following from that:
+  /// - **It is a snapshot, not a pointer.** Each call stores its own copy, so a later check of the
+  ///   same account cannot rewrite what an earlier transaction says. Recording one answer against
+  ///   two transactions — a user who transfers to the same account twice — is two calls with two
+  ///   ids and one billed check.
+  /// - **It outlives the cache entry.** The lifetime is `policy.transactionCheckRetention` rather
+  ///   than a tier TTL, and `cacheTtlSeconds` is not applied: that field retracts a verdict, and a
+  ///   record of the past cannot be retracted.
+  /// - **`origin` and `fetchedAt` are stored as given**, so a record marked `.cache` is the honest
+  ///   statement that this transfer spent no credit.
+  ///
+  /// Implementations must persist `result.transactionRecordCopy()`, not `result`.
+  ///
+  /// Call it **after** the transaction exists. In a transfer flow the check happens on the
+  /// confirmation screen and the reference number is minted after the PIN, so there is no id to pass
+  /// when the check is made — which is why this is a separate call rather than a parameter on
+  /// `checkScammer`.
+  ///
+  /// - Throws: `CheckCacheError.invalidTransactionId` when `transactionId` is blank.
+  func writeTransactionCheck(_ result: CheckResult, for transactionId: String) throws
+
+  /// The answer recorded for `transactionId`, or `nil` when there is none.
+  ///
+  /// `nil` covers a transaction that was never recorded, one past its retention, and a record that
+  /// would not decrypt. A UI must read it as **"no check is on file"** and show nothing, never as
+  /// "no reports were found": the second is a clean bill of health for a transfer nobody checked.
+  ///
+  /// Unlike `read` this does not restamp `origin`, and it does not apply the tier TTL. The record is
+  /// a statement about a past moment, not a cached answer offered as current.
+  ///
+  /// - Throws: `CheckCacheError.invalidTransactionId` when `transactionId` is blank.
+  func readTransactionCheck(for transactionId: String) throws -> CheckResult?
+
+  /// Deletes one transaction record. Leaves the cache entry it was copied from, and every other
+  /// transaction's record, alone.
+  ///
+  /// - Throws: `CheckCacheError.invalidTransactionId` when `transactionId` is blank.
+  func removeTransactionCheck(for transactionId: String) throws
+
+  /// Deletes everything, transaction records included. This is what `client.cache.clear()` calls.
+  ///
+  /// Sign-out goes through here, so a host whose transaction history outlives a Tracive sign-out
+  /// should expect the check card on those older transactions to go quiet: the verdict was read
+  /// under a grant that no longer exists.
   func clear() throws
 
   /// Deletes expired entries and enforces `policy.maxEntries`.
@@ -119,6 +171,32 @@ public final class NoOpCheckCache: CheckCache {
   public func write(_ result: CheckResult, for key: CheckCacheKey) throws {}
   public func remove(_ key: CheckCacheKey) throws {}
   public func clear() throws {}
+
+  // Transaction records go with the cache, because they are rows in it. A host that wants the check
+  // card on its transaction-detail screen has to wire a real cache — there is nowhere else to put
+  // them, and quietly storing them somewhere this object controls would be a second, undocumented
+  // store on a device whose owner was told there is none. The blank-id check still runs, so a host
+  // finds that bug with the cache off rather than only in production.
+
+  public func writeTransactionCheck(_ result: CheckResult, for transactionId: String) throws {
+    _ = try Self.requireKey(transactionId)
+  }
+
+  public func readTransactionCheck(for transactionId: String) throws -> CheckResult? {
+    _ = try Self.requireKey(transactionId)
+    return nil
+  }
+
+  public func removeTransactionCheck(for transactionId: String) throws {
+    _ = try Self.requireKey(transactionId)
+  }
+
+  private static func requireKey(_ transactionId: String) throws -> TransactionRecordKey {
+    guard let key = TransactionRecordKey(transactionId: transactionId) else {
+      throw CheckCacheError.invalidTransactionId
+    }
+    return key
+  }
 
   @discardableResult
   public func prune() throws -> Int { 0 }

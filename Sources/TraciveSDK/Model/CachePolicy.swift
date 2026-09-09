@@ -35,6 +35,24 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
   /// a write on every cache hit and turn the cheap path into the expensive one.
   public var maxEntries: Int?
 
+  /// How long a transaction record — the answer that was shown for one of your transactions — is
+  /// kept. Zero or less stores none at all.
+  ///
+  /// A separate knob from the TTLs above because it answers a different question. A TTL asks "is
+  /// this verdict still worth trusting?", and an hour is right for a clean one. A retention asks
+  /// "can the user still see what they were told before they sent the money?", and that does not
+  /// decay: the record is a fact about the past, so the only thing that should end it is the host's
+  /// own data-minimisation policy.
+  ///
+  /// 90 days matches how far back a transaction list is usually browsed. Raise it if your history
+  /// screen goes back further — and raise `maxEntries` with it, since records are counted by the
+  /// same cap as cache entries.
+  ///
+  /// `cacheTtlSeconds` is deliberately not applied to these. That field retracts a verdict the
+  /// backend no longer stands behind, which is the wrong lever for a record of what a user was
+  /// already shown.
+  public var transactionCheckRetention: TimeInterval
+
   public init(
     isEnabled: Bool = true,
     highTtl: TimeInterval = 30 * 24 * 60 * 60,
@@ -42,7 +60,8 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
     cautionTtl: TimeInterval = 24 * 60 * 60,
     noneTtl: TimeInterval = 60 * 60,
     honorsServerTtlOverride: Bool = true,
-    maxEntries: Int? = 5_000
+    maxEntries: Int? = 5_000,
+    transactionCheckRetention: TimeInterval = 90 * 24 * 60 * 60
   ) {
     self.isEnabled = isEnabled
     self.highTtl = highTtl
@@ -51,6 +70,7 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
     self.noneTtl = noneTtl
     self.honorsServerTtlOverride = honorsServerTtlOverride
     self.maxEntries = maxEntries
+    self.transactionCheckRetention = transactionCheckRetention
   }
 
   /// The spec defaults.

@@ -44,10 +44,13 @@ struct CachePayloadCipher {
   /// the single point where bytes destined for disk are produced — enforcing "full detail is never
   /// cached" here means no future caller can route around it.
   func seal(_ result: CheckResult, for key: CheckCacheKey) throws -> Data {
-    let cacheable = result.cacheableCopy()
+    try sealEncoded(result.cacheableCopy(), additionalData: additionalData(for: key))
+  }
+
+  private func sealEncoded(_ result: CheckResult, additionalData: Data) throws -> Data {
     let plaintext: Data
     do {
-      plaintext = try Self.encoder.encode(cacheable)
+      plaintext = try Self.encoder.encode(result)
     } catch {
       throw CheckCacheError.encryptionFailed(underlying: error)
     }
@@ -56,7 +59,7 @@ struct CachePayloadCipher {
       let sealed = try AES.GCM.seal(
         plaintext,
         using: try keyStore.dataKey(),
-        authenticating: additionalData(for: key)
+        authenticating: additionalData
       )
       guard let combined = sealed.combined else {
         // `combined` is only nil for a nonce that is not 96 bits, and we never supply one — CryptoKit
@@ -78,6 +81,10 @@ struct CachePayloadCipher {
   ///   longer decodes. The caller deletes the row and reports a miss — a cache that cannot be read is
   ///   a cold cache, not a broken SDK.
   func open(_ combined: Data, for key: CheckCacheKey) throws -> CheckResult {
+    try openEncoded(combined, additionalData: additionalData(for: key))
+  }
+
+  private func openEncoded(_ combined: Data, additionalData: Data) throws -> CheckResult {
     let dataKey: SymmetricKey
     do {
       dataKey = try keyStore.dataKey()
@@ -89,19 +96,34 @@ struct CachePayloadCipher {
 
     do {
       let box = try AES.GCM.SealedBox(combined: combined)
-      let plaintext = try AES.GCM.open(
-        box,
-        using: dataKey,
-        authenticating: additionalData(for: key)
-      )
+      let plaintext = try AES.GCM.open(box, using: dataKey, authenticating: additionalData)
       return try Self.decoder.decode(CheckResult.self, from: plaintext)
     } catch {
       throw CheckCacheError.payloadUnreadable
     }
   }
 
+  /// Seals a transaction record.
+  ///
+  /// Two deliberate differences from `seal(_:for:)`. It applies `transactionRecordCopy()` rather
+  /// than `cacheableCopy()` — a record keeps `checkId` and `billing`, which is the point of it — and
+  /// it authenticates under a different label, so a record and a cached answer can never be opened
+  /// as one another even though they share a table.
+  func sealRecord(_ result: CheckResult, for key: TransactionRecordKey) throws -> Data {
+    try sealEncoded(result.transactionRecordCopy(), additionalData: additionalData(for: key))
+  }
+
+  /// Opens a stored transaction record. Same failure posture as `open(_:for:)`.
+  func openRecord(_ combined: Data, for key: TransactionRecordKey) throws -> CheckResult {
+    try openEncoded(combined, additionalData: additionalData(for: key))
+  }
+
   private func additionalData(for key: CheckCacheKey) -> Data {
     Data("tracive.cache.v\(schemaVersion)|\(key.hex)".utf8)
+  }
+
+  private func additionalData(for key: TransactionRecordKey) -> Data {
+    Data("tracive.record.v\(schemaVersion)|\(key.hex)".utf8)
   }
 
   // JSON rather than a hand-rolled binary format: `CheckResult` already owns a lenient `Codable`

@@ -1840,6 +1840,10 @@ final class UnclearableCheckCache: CheckCache {
   func remove(_ key: CheckCacheKey) throws {}
   func clear() throws { throw Failure() }
 
+  func writeTransactionCheck(_ result: CheckResult, for transactionId: String) throws {}
+  func readTransactionCheck(for transactionId: String) throws -> CheckResult? { nil }
+  func removeTransactionCheck(for transactionId: String) throws {}
+
   @discardableResult
   func prune() throws -> Int { 0 }
 

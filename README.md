@@ -297,6 +297,28 @@ try client.cache.clear()
 | `.serverFirst` | the server, falling back to the cache only when the failure is transient — a network error, 429 or 5xx. A 402 or 403 is raised, never masked by a cached verdict | always the server; a failure is raised, not degraded |
 | `.cache` | cache only; a miss throws `TraciveError.cacheMiss` rather than answering empty | always `TraciveError.cacheMiss`; still no network call |
 
+### Showing the check again on a transaction detail
+
+A cache read answers "what does Tracive say about this account now". A transaction-detail screen asks
+"what was this user shown before they sent the money" — a different question, and one the cache
+cannot answer, because it keeps only the latest verdict per account and drops a clean one after an
+hour. Record it against your own transaction id instead:
+
+```swift
+// Once the transfer exists and has a reference number.
+try client.cache.writeTransactionCheck(result, for: "TRF26090814320771")
+
+// Weeks later, on the detail screen. nil = no check on file; render nothing, never "no reports".
+if let shown = try client.cache.readTransactionCheck(for: "TRF26090814320771") {
+  renderSecurityCheckCard(shown)
+}
+```
+
+Each record is a snapshot on its own 90-day retention, so a later check of the same account cannot
+rewrite an older transaction's card, and one check can be recorded against several transactions — the
+second transfer to an account you already checked costs nothing and still gets a card. Full rules in
+[Docs/caching.md](Docs/caching.md#recording-what-a-transaction-was-shown).
+
 ### `detail: .full` does not use the cache at all — in either direction
 
 **It is never read.** Full-detail content is never stored, so serving a stored row to a `.full`

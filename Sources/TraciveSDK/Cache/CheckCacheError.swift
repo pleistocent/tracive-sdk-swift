@@ -45,6 +45,14 @@ public enum CheckCacheError: Error, CustomStringConvertible, LocalizedError {
   /// degrades into "the cache is cold" instead of "every check now throws".
   case payloadUnreadable
 
+  /// A transaction record was addressed with a blank id.
+  ///
+  /// Caller error rather than a storage fault, and thrown rather than trapped: a crash inside a
+  /// fraud SDK is worse than any error it could report. It is not silently ignored either — a blank
+  /// id would file every unlabelled transaction under one shared row, so the next read would hand a
+  /// transaction someone else's verdict.
+  case invalidTransactionId
+
   public var description: String {
     switch self {
     case .storageFailure(let code, let message):
@@ -59,6 +67,8 @@ public enum CheckCacheError: Error, CustomStringConvertible, LocalizedError {
       return "encryptionFailed(\(underlying))"
     case .payloadUnreadable:
       return "payloadUnreadable"
+    case .invalidTransactionId:
+      return "invalidTransactionId"
     }
   }
 

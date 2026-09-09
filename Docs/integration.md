@@ -240,6 +240,47 @@ func render(_ result: CheckResult) {
 `relatedScammerCount` is a count and never a list, on purpose: the SDK cannot walk the scammer graph,
 so do not build a UI that expects to.
 
+### Keep the check on the transaction it belongs to
+
+A verdict is worth showing twice: once while the user can still stop, and once afterwards, on the
+record of what they did. The second one is not a second check — record the first and read it back.
+
+```swift
+// After the transfer is created and has its own reference.
+try client.cache.writeTransactionCheck(result, for: transaction.reference)
+
+// On the transaction detail, however much later.
+if let shown = try client.cache.readTransactionCheck(for: transaction.reference) {
+  renderSecurityCheckCard(shown)     // tier, counts, shown.fetchedAt, shown.disclaimer
+}
+```
+
+**When to run the check**
+
+- **On the confirmation screen, before the PIN.** The user has seen the payee's name and the amount,
+  so they have a reason to care, and they have not authorised anything yet, so a warning can still
+  save the money for free.
+- **Not while they are typing the account number.** There is no payee name on screen yet, so the
+  answer means nothing to them — and every typo costs a credit.
+- **Not on the receipt.** A warning after the money has gone is not protection, it is bad news. The
+  receipt is the right place to *record* that a check happened, never to run one.
+- **On the first transfer to a given account, plus a manual "check this payee" action.** Re-checking
+  a payee the user pays every month spends their credits and teaches them to swipe past the result.
+
+**When to record it**
+
+- **Whenever a transaction exists and a check was run for it** — including, and especially, one where
+  the user was warned and chose to continue. That is the transfer whose history someone will ask
+  about.
+- **Once per transaction, not once per check.** Two transfers to one account share one billed check;
+  call `writeTransactionCheck` twice, with each transfer's own id.
+- **Never when the user declined the check.** No record means no card, which is the truth. Rendering
+  an empty result as "no reports found" invents a reassurance nobody gave.
+- **Do not send any of it to your own servers.** The partner terms forbid uploading Tracive results,
+  including derived values like a tier or a report count. What may leave the device is the user's
+  decision — `riskAccepted`, `riskAcceptedAt` — and that is enough to defend the transfer in a
+  dispute.
+
 ## 8. Handle errors properly
 
 ```swift
