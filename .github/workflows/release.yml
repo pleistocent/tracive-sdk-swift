@@ -1,0 +1,173 @@
+name: Release
+
+# ---------------------------------------------------------------------------------------------
+# One dispatch cuts a whole release: the gates, the tag, the GitHub release.
+#
+# There is no package registry step here and that is not an omission. Swift Package Manager
+# resolves `from: "0.1.0"` against this repository's git tags, so **the tag is the artifact** —
+# and it is published the instant it is pushed, with no upload, no review queue and nothing to
+# withdraw. That makes the gates below the only thing standing between a bad commit and every
+# partner's next `swift package update`, which is why they run before the tag and not after.
+#
+# See Docs/RELEASING.md.
+# ---------------------------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.1.0 — no "v" prefix'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run every check, but tag nothing and release nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs of the same version must never race for the tag. Keyed on the version rather than the
+  # ref: two dispatches of 0.1.0 from different branches are still the same release.
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  # Everything knowable in the first minute, checked in the first minute — the gates below take
+  # twenty minutes of macOS runner, and a version typo should not cost that.
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags, so the "already released" check below can see them. Set explicitly rather than
+          # left to fall out of fetch-depth: without it the check silently passes on every run.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate the version
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '$VERSION' — expected x.y.z with no 'v' prefix"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+      # The sibling SDKs also check the version against the manifest — gradle.properties,
+      # pubspec.yaml, package.json. There is no equivalent here: a Swift package carries no version
+      # of its own, which is exactly why the tag has to be right. CHANGELOG.md is the only other
+      # place the number appears, and the next step is what checks it.
+
+      - name: The changelog has a section for this version
+        run: |
+          # The GitHub release body comes out of CHANGELOG.md, so a missing section is a release
+          # with no notes. It is also the check that catches the commonest mistake in this
+          # procedure: releasing with the changes still sitting under `## [Unreleased]`.
+          VERSION="${{ steps.version.outputs.version }}"
+          awk -v head="## [$VERSION]" '
+            index($0, head) == 1 { inside = 1; next }
+            inside && index($0, "## ") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section, or it is empty — move the entries out of [Unreleased] first"
+            exit 1
+          fi
+          echo "Release notes ($(wc -l < release-notes.md) lines):"
+          cat release-notes.md
+
+      - name: This version has not been released already
+        run: |
+          # A tag is what SPM resolves, so re-pointing one silently changes what a partner who
+          # already pinned this version compiles against. Moving a released tag is never the fix;
+          # bumping the version is.
+          VERSION="${{ steps.version.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists — bump the version"
+            exit 1
+          fi
+
+      - name: Keep the release notes for the release job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 1
+
+  # The same gates CI runs. They are not automatic in this repository — ci.yml is dispatch-only to
+  # keep metered macOS minutes down — so without this a release could be cut from code nothing has
+  # ever checked. This is the one run where the minutes are unarguable.
+  verify:
+    name: Verify
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Tag and release
+    needs: [preflight, verify]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The tag and the GitHub release. Everything else in this workflow reads.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The exact commit this dispatch started from, not whatever main has become since the
+          # gates started running twenty minutes ago.
+          ref: ${{ github.sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Tag and create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          git tag -a "v$VERSION" -m "v$VERSION" "${{ github.sha }}"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file release-notes.md \
+            --verify-tag
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          {
+            echo "### Released $VERSION"
+            echo ""
+            echo "The tag is the package. \`swift package update\` picks it up as soon as GitHub has it — there is no registry to wait for."
+            echo ""
+            echo "\`\`\`swift"
+            echo ".package(url: \"https://github.com/pleistocent/tracive-sdk-swift.git\", from: \"$VERSION\")"
+            echo "\`\`\`"
+            echo ""
+            echo "- [GitHub release](https://github.com/pleistocent/tracive-sdk-swift/releases/tag/v$VERSION)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  dry-run-summary:
+    name: Dry run
+    needs: [preflight, verify]
+    if: ${{ inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          {
+            echo "### Dry run of ${{ needs.preflight.outputs.version }}"
+            echo ""
+            echo "Every gate passed. Nothing was tagged and nothing was released."
+          } >> "$GITHUB_STEP_SUMMARY"
