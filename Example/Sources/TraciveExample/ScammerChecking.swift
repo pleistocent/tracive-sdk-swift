@@ -6,8 +6,8 @@ import TraciveSDK
 /// The screen depends on this protocol rather than on `TraciveClient` directly, which is the same
 /// shape you should use in your own app. It buys three things:
 ///
-/// 1. **The example runs today.** The Tracive Open API is not deployed, so a demo wired straight to
-///    the network would be a demo nobody can run.
+/// 1. **The example runs today.** A demo wired straight to the network needs credentials and a
+///    reachable host, which is a demo nobody can run on a fresh clone.
 /// 2. **Your UI tests do not need a network.** Swap in a stub and assert what the screen renders for
 ///    `HIGH`, for `NONE`, for a 402, for a timeout — none of which you can reliably provoke against
 ///    a real server.

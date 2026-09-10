@@ -231,3 +231,53 @@ jobs:
         # Building it here is what stops the README's sample code from rotting.
         working-directory: Example
         run: swift build -v
+
+      - name: Install XcodeGen
+        # The app target's project is generated, not hand-written. The two steps below need the
+        # generator, and it is not on the runner image.
+        run: brew install xcodegen
+
+      - name: The checked-in Xcode project still matches its spec
+        # `Example/App/TraciveSwiftExample.xcodeproj` is committed so the repository can be opened
+        # and run without installing anything, which makes it the one file here that can be edited
+        # in two places. Xcode writes to the pbxproj every time someone changes a build setting in
+        # the UI, and that edit is invisible in review — a 20 000-line generated file that nobody
+        # reads. This step regenerates it from `project.yml` and fails if the result differs, so the
+        # spec stays the source of truth rather than becoming a stale comment next to the real
+        # settings.
+        #
+        # Verified to be capable of failing: hand-editing one build setting in the pbxproj (the way
+        # Xcode would) makes this exit 1 and print the offending diff; the clean tree passes.
+        working-directory: Example/App
+        run: |
+          xcodegen generate
+          git diff --exit-code -- TraciveSwiftExample.xcodeproj \
+            || { echo "::error::TraciveSwiftExample.xcodeproj does not match project.yml. Run 'cd Example/App && xcodegen generate' and commit the result — do not hand-edit the pbxproj."; exit 1; }
+
+      - name: Build the example app, and prove its icon compiled
+        # `swift build` above compiles the example's *sources*; it cannot compile an app, so nothing
+        # until now has exercised the app target at all.
+        #
+        # The `Assets.car` and `CFBundleIconName` assertions are the point of this step, and a plain
+        # build is not a substitute for them. An asset catalog that is dropped from the Resources
+        # build phase, or an empty `ASSETCATALOG_COMPILER_APPICON_NAME`, compiles no icon and reports
+        # nothing: the app still builds, still installs and still launches, and the only symptom is a
+        # grey placeholder grid on the home screen of whoever runs it. That is the failure this
+        # repository has actually shipped before.
+        #
+        # Verified to be capable of failing: a build with `ASSETCATALOG_COMPILER_APPICON_NAME=""`
+        # still reports BUILD SUCCEEDED, and both assertions below fire on it — no `Assets.car` in
+        # the bundle and no `CFBundleIconName` in its Info.plist.
+        working-directory: Example/App
+        run: |
+          xcodebuild \
+            -project TraciveSwiftExample.xcodeproj \
+            -scheme TraciveSwiftExample \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData \
+            build
+          app="DerivedData/Build/Products/Debug-iphonesimulator/TraciveSwiftExample.app"
+          test -f "$app/Assets.car" \
+            || { echo "::error::no Assets.car in the built app — the asset catalog is not in the Resources build phase."; exit 1; }
+          plutil -p "$app/Info.plist" | grep -q '"CFBundleIconName" => "AppIcon"' \
+            || { echo "::error::CFBundleIconName missing from the built app — ASSETCATALOG_COMPILER_APPICON_NAME did not resolve, and the home-screen icon will be a grey placeholder."; exit 1; }

@@ -1,0 +1,64 @@
+# The Xcode project for the example app, declared rather than hand-written.
+#
+# `TraciveSwiftExample.xcodeproj` next to this file is generated output and is committed only so the
+# repository can be opened and run without installing anything. This file is the source of truth:
+#
+#   brew install xcodegen && cd Example/App && xcodegen generate
+#
+# Regenerate rather than hand-patch the pbxproj. A hand-edited project drifts from this spec, and the
+# way it fails is quiet — an asset catalog dropped from the Resources phase still builds, installs
+# and launches, and only shows up as a grey placeholder icon on the home screen.
+#
+# The app is a thin shell on purpose. `Example/` stays a SwiftPM library so CI can verify it with a
+# plain `swift build` on a Mac with no simulator, and this target consumes that library exactly the
+# way the README tells a partner to.
+name: TraciveSwiftExample
+
+options:
+  bundleIdPrefix: id.tracive.sdk
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+packages:
+  # The example library, one directory up. It in turn has a path dependency on the SDK at the
+  # repository root, so opening this project resolves the whole chain with nothing to fetch.
+  TraciveExample:
+    path: ..
+
+targets:
+  TraciveSwiftExample:
+    type: application
+    platform: iOS
+
+    sources:
+      - path: Sources
+      # Explicit build phase. This is the line the grey-placeholder-icon bug is made of: an asset
+      # catalog that lands anywhere but `resources` compiles no icon, and nothing anywhere reports it.
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+      - path: Resources/Info.plist
+        buildPhase: none
+
+    dependencies:
+      - package: TraciveExample
+        product: TraciveExample
+
+    settings:
+      base:
+        # Distinct from the KMP sample's `id.tracive.sdk.sample`. The two are meant to sit on the
+        # same device — the point of the ribbon on the icon — and a shared bundle id would make
+        # installing one uninstall the other.
+        PRODUCT_BUNDLE_IDENTIFIER: id.tracive.sdk.sample.swift
+        INFOPLIST_FILE: Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        # Empty here yields a home screen icon that is a grey grid, with no error at build,
+        # install or launch time.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.0"
+
+    scheme:
+      testTargets: []

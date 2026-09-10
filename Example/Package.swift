@@ -7,8 +7,9 @@ import PackageDescription
 // target, for two reasons: it consumes the package exactly the way a partner app does, and CI builds
 // it on every PR — so the sample code in the README cannot rot without turning something red.
 //
-// The whole example runs offline. There is no server to talk to (the Tracive Open API is not
-// deployed), and an example that needs one would be a demo nobody can run.
+// The whole example runs offline: the screen is handed a stub instead of a client, so it needs
+// neither credentials nor a reachable host. An example that needs either is one nobody can run on a
+// fresh clone, and CI cannot be made to depend on an environment being up.
 let package = Package(
   name: "TraciveExample",
   platforms: [

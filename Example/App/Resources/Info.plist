@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+
+  <!--
+    The home-screen label. Without this key the app installs under PRODUCT_NAME, which is the target
+    name — the first thing a partner evaluating the SDK would see.
+
+    Kept short on purpose. iOS tightens the tracking on a label that does not fit rather than simply
+    truncating it, and it tightens far enough that the spaces close up: an 18-character name renders
+    as one run-on word, while 15 characters still renders in full. The name says the platform rather
+    than repeating "SDK", which the ribbon on the icon already carries, so this one reads next to
+    "Tracive KMP", "Tracive Flutter" and "Tracive RN" on a device that has several of them.
+  -->
+  <key>CFBundleDisplayName</key>
+  <string>Tracive Swift</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>UILaunchScreen</key>
+  <dict/>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+  </array>
+
+  <!--
+    Package visibility for the SDK's "is the Tracive app installed?" pre-check. Info.plist files are
+    not merged, so this cannot ship inside the SDK — every host app has to declare it, and without it
+    canOpenURL answers false on every device, installed or not.
+
+    Both entries because the probe follows `environment`: `tracive` is the production app,
+    `tracivedev` the sandbox build. This demo never runs OAuth, so nothing here exercises the key —
+    it is present because this plist is the one a partner copies. See Docs/integration.md.
+  -->
+  <key>LSApplicationQueriesSchemes</key>
+  <array>
+    <string>tracive</string>
+    <string>tracivedev</string>
+  </array>
+
+  <!--
+    TODO(partner): add CFBundleURLTypes for your OAuth redirect, or better, an `applinks:`
+    entitlement for a host you own. There is none here because the example never leaves the device.
+  -->
+</dict>
+</plist>

@@ -241,8 +241,8 @@ public struct ScammerCheckView: View {
       Text("Offline demo")
         .font(.caption.weight(.semibold))
       Text(
-        "Results are canned. The Tracive Open API is not deployed yet, and phase 1 supports "
-          + "OAuth mode only — Proxy mode arrives in phase 2."
+        "Results are canned: this screen is wired to a stub, so it runs with no credentials and "
+          + "no network. Phase 1 supports OAuth mode only — Proxy mode arrives in phase 2."
       )
       .font(.caption2)
       .foregroundColor(.secondary)

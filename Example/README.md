@@ -23,8 +23,9 @@ cannot rot silently.
 
 ## It runs entirely offline
 
-There is nothing to connect to. The Tracive Open API is not deployed, so the example is wired to
-`SampleChecker`, which returns canned verdicts keyed on the last digit of the number:
+The screen is wired to `SampleChecker` rather than to a client, so it needs neither credentials nor
+a reachable host — which is what keeps it runnable on a fresh clone and in CI. It returns canned
+verdicts keyed on the last digit of the number:
 
 | Last digit | Result |
 |---|---|
@@ -67,25 +68,45 @@ grep -rn "TODO(partner)" Example
 
 ## Running it as an app
 
-This package is a **library** so that `swift build` can verify it on a Mac without an Xcode project
-in the repository. To run it on a device or simulator:
+This package stays a **library** so `swift build` can verify it on a Mac with no simulator and no
+Xcode project involved. `App/` is an iOS app target that hosts the same views, so the example can
+also be installed and run:
 
-1. Create an iOS App target in Xcode (iOS 15+).
-2. **File → Add Package Dependencies… → Add Local…** and pick the repository root.
-3. Add these two source files to the app target, or add this package as a second local dependency.
-4. In your `App` body:
-
-```swift
-import SwiftUI
-import TraciveExample
-
-@main
-struct DemoApp: App {
-  var body: some Scene {
-    WindowGroup { ScammerCheckView() }
-  }
-}
+```bash
+open App/TraciveSwiftExample.xcodeproj      # then ⌘R
 ```
 
-For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive` and a
-Universal Link redirect URI — see [`../Docs/integration.md`](../Docs/integration.md).
+Or from a terminal:
+
+```bash
+xcodebuild -project App/TraciveSwiftExample.xcodeproj -scheme TraciveSwiftExample \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+```
+
+It installs as **Tracive Swift**, wearing the Tracive icon with a red `SDK` ribbon so it is not
+mistaken for the real Tracive app on a device that has both.
+
+The project is generated from [`App/project.yml`](App/project.yml) by
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) and committed so the repository can be opened
+without installing anything. Change the spec, not the `.pbxproj`:
+
+```bash
+brew install xcodegen && cd App && xcodegen generate
+```
+
+### What the app exercises that `swift build` cannot
+
+`ScammerCheckView()` builds its own in-memory cache with an ephemeral key, which is right for a
+library CI compiles and never runs. `App/Sources/TraciveExampleApp.swift` instead passes a cache
+backed by the on-disk `SQLiteCheckCache` and `KeychainCacheKeyStore`, because that pairing needs an
+app sandbox and a Keychain to exist at all. Check a number, relaunch, check it again: a **Cached**
+badge after a cold start is the data key surviving the process.
+
+That same composition root is where a real `TraciveClient` would be injected — the app passes a
+`ScammerChecking`, so pointing this screen at a live environment is one type, not an edit to the UI.
+The stub stays the default: an example that needs credentials and a reachable host is one nobody can
+run on a fresh clone.
+
+For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive` (the app's
+`Info.plist` has it) and a Universal Link redirect URI — see
+[`../Docs/integration.md`](../Docs/integration.md).
