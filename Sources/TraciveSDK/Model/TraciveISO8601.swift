@@ -10,6 +10,12 @@ import Foundation
 /// form (`2026-07-09T10:00:00.123Z`), and any RFC 3339 offset (`+07:00`). Formatting always emits
 /// UTC with whole seconds, so instants round-trip through the cache at **second** precision — which
 /// is far below the smallest cache TTL (1 hour) and therefore harmless.
+///
+/// It also accepts a bare calendar date (`2025-03-14`) and reads it as midnight UTC, because one
+/// field on the wire really is a date: `memberSince` is the account's creation timestamp truncated
+/// by the server, and its spec types it `format: date`. Without this the field was nil for every
+/// user who has one — which is all of them — and the loss was silent, since an unparseable instant
+/// is deliberately read as "absent".
 public enum TraciveISO8601 {
 
   /// Parses an ISO-8601 instant. Returns `nil` for anything unparseable — callers treat a bad
@@ -32,6 +38,7 @@ private final class FormatterBox: @unchecked Sendable {
   private let lock = NSLock()
   private let fractional: ISO8601DateFormatter
   private let whole: ISO8601DateFormatter
+  private let dateOnly: ISO8601DateFormatter
 
   init() {
     let fractional = ISO8601DateFormatter()
@@ -43,6 +50,11 @@ private final class FormatterBox: @unchecked Sendable {
     whole.timeZone = TimeZone(secondsFromGMT: 0)
     whole.formatOptions = [.withInternetDateTime]
     self.whole = whole
+
+    let dateOnly = ISO8601DateFormatter()
+    dateOnly.timeZone = TimeZone(secondsFromGMT: 0)
+    dateOnly.formatOptions = [.withFullDate]
+    self.dateOnly = dateOnly
   }
 
   func date(from string: String) -> Date? {
@@ -51,6 +63,7 @@ private final class FormatterBox: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return fractional.date(from: trimmed) ?? whole.date(from: trimmed)
+      ?? dateOnly.date(from: trimmed)
   }
 
   func string(from date: Date) -> String {

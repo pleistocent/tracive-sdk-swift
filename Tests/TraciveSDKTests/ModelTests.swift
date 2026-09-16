@@ -336,6 +336,34 @@ final class ModelTests: XCTestCase {
     XCTAssertTrue(profile.description.contains("IDN"))
   }
 
+  /// `GET /v1/profile` sends `memberSince` as a plain date: the server truncates the account's
+  /// creation timestamp, and its spec types the field `format: date`. Every real user has one, so
+  /// dropping it silently emptied the field for everybody rather than in some edge case.
+  ///
+  /// The expected value is built from calendar components rather than from `TraciveISO8601`, so
+  /// the assertion cannot agree with the parser it is checking.
+  func testProfileInfoReadsADateOnlyMemberSince() throws {
+    let profile = try decode(
+      ProfileInfo.self,
+      #"{ "sub": "user_abc", "name": "Nico", "country": "IDN", "tier": "plus", "memberSince": "2025-03-14" }"#
+    )
+
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+    let expected = try XCTUnwrap(
+      calendar.date(from: DateComponents(year: 2025, month: 3, day: 14)))
+
+    XCTAssertEqual(profile.memberSince, expected)
+  }
+
+  /// Tolerance adds a shape; it does not make the parser guess. A value that is neither an instant
+  /// nor a date stays nil rather than becoming some nearby date.
+  func testProfileInfoLeavesAnUnparseableMemberSinceNil() throws {
+    let profile = try decode(
+      ProfileInfo.self, #"{ "sub": "user_abc", "memberSince": "last Tuesday" }"#)
+    XCTAssertNil(profile.memberSince)
+  }
+
   /// A narrow OAuth grant legitimately returns only a subject id.
   func testProfileInfoToleratesAScopeLimitedResponse() throws {
     let profile = try decode(ProfileInfo.self, #"{ "sub": "user_abc" }"#)
