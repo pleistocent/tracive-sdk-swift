@@ -10,7 +10,7 @@ import XCTest
 /// a failure here means this SDK would build keys that miss on the server — and a miss is
 /// still billed.
 ///
-/// Nothing in this file touches the network. The Open API does not exist yet.
+/// Nothing in this file touches the network.
 final class QueryGrammarTests: XCTestCase {
 
   // MARK: - Fixture

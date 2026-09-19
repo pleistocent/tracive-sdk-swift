@@ -2255,10 +2255,10 @@ extension AuthResult {
 ///
 /// They were not. `README.md`, `Docs/integration.md` (twice) and `Docs/oauth.md` all said
 /// `"scammer.read"`, while every code path, sample and test in the package used `"scammer.check"`.
-/// Both cannot be right, and with the authorization server not deployed nobody could find out
-/// empirically. A partner copy-pasting the README's quick start would have requested a scope that
-/// does not exist and been answered `403 missing_scope` by `checkScammer` — an error whose
-/// documented remedy points them at their client registration rather than at the typo.
+/// Both cannot be right, and with the authorization server not yet deployed at the time, nobody
+/// could find out empirically. A partner copy-pasting the README's quick start would have requested
+/// a scope that does not exist and been answered `403 missing_scope` by `checkScammer` — an error
+/// whose documented remedy points them at their client registration rather than at the typo.
 ///
 /// This drives the doc files themselves rather than restating their contents, because a test that
 /// merely asserted the canonical spelling would have passed happily while the README stayed wrong.
@@ -2355,7 +2355,7 @@ final class DocumentedScopeTests: XCTestCase {
 /// against a shared symbol, would pass no matter what the value became. Renaming a constant breaks
 /// compilation here, and changing one's value fails the assertion — either way the contract cannot
 /// be redefined quietly, which matters because nothing else can check it: the authorization server
-/// is the only validator of a scope name and it is not deployed.
+/// is the only validator of a scope name, and no test here can ask it.
 final class TraciveScopeConstantTests: XCTestCase {
 
   func testScammerCheckIsTheExactWireString() {

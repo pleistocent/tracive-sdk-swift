@@ -613,8 +613,9 @@ public actor TraciveClient {
     // The SDK re-sends this exact POST after a 401 refresh (see `sendAuthorized`). Without a key
     // the two attempts are indistinguishable to the server, so any billing that happens before or
     // during authorisation is charged twice, with no way for the caller to detect it. This code
-    // used to justify that with "a 401 is rejected before billing" — an assumption about a server
-    // that does not exist yet, and the one premise this SDK otherwise refuses to make anywhere.
+    // used to justify that with "a 401 is rejected before billing" — an assumption about the
+    // server's ordering that nothing on the client can verify, and the one premise this SDK
+    // otherwise refuses to make anywhere.
     // Generating a key removes the need to assume anything.
     //
     // A generated key is *not* a licence to retry: `isRetryable` below still keys off the caller's

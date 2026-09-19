@@ -5,10 +5,9 @@ import XCTest
 /// `TraciveClient` behaviour: request shape, cache routing, the retry rule that protects the
 /// caller's credits, and the single-flight 401 refresh.
 ///
-/// **Nothing here touches a network.** The Tracive Open API is not live yet — there is no
-/// deployed `/v1/*` route — so every response is scripted through `FakeHTTPTransport`. That is
-/// not a limitation of the suite; it is the only way this SDK can be specified at all right now,
-/// and it stays true after the backend ships.
+/// **Nothing here touches a network.** Every response is scripted through `FakeHTTPTransport`.
+/// That is not a limitation of the suite: a live environment cannot be made to answer a 402, a 429
+/// or a revoked grant on demand, and a suite that depends on one fails whenever it is down.
 ///
 /// This file also carries the test doubles shared with `OAuthTests` and `ErrorMappingTests`.
 final class ClientTests: XCTestCase {
@@ -114,7 +113,7 @@ final class ClientTests: XCTestCase {
   /// The SDK re-sends the *same* non-idempotent POST after a 401 refresh. Without a key on both
   /// attempts the two are indistinguishable to the server, so anything that bills before or during
   /// authorisation double-charges with no way for the caller to detect it. The SDK cannot know the
-  /// server's ordering — the server does not exist yet — so it must not depend on it.
+  /// server's ordering, so it must not depend on it.
   func testAGeneratedIdempotencyKeyIsAttachedWhenTheCallerSuppliesNone() async throws {
     let transport = FakeHTTPTransport { _, _ in .ok(json: Fixtures.minimalCheckJSON) }
     let client = makeClient(transport: transport)

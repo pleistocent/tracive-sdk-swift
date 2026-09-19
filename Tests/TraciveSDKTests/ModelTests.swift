@@ -5,7 +5,7 @@ import XCTest
 /// Model-layer contract tests: wire decoding, forward compatibility, cache projection, TTL rules,
 /// configuration surface and the error map.
 ///
-/// No network. The Open API does not exist yet, so every payload here is a literal.
+/// No network: every payload here is a literal.
 final class ModelTests: XCTestCase {
 
   // MARK: - Helpers

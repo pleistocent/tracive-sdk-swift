@@ -1,8 +1,7 @@
 name: CI
 
-# Every unit test in this package runs offline against injected fakes — the Tracive Open API does
-# not exist yet, and no test may depend on a live host. If a job here ever needs network access to
-# go green, something has been wired up wrong.
+# Every unit test in this package runs offline against injected fakes — no test may depend on a
+# live host. If a job here ever needs network access to go green, something has been wired up wrong.
 
 # ---------------------------------------------------------------------------------------------
 # CI IS OFF — re-enable when there is budget for it.

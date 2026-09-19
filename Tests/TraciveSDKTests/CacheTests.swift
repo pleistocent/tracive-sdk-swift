@@ -7,10 +7,10 @@ import XCTest
 
 /// Exercises the local encrypted result cache.
 ///
-/// Nothing here touches the network — the Tracive Open API does not exist yet — and nothing here
-/// touches the real Keychain. Every store is built with `EphemeralCacheKeyStore`, because a
-/// `swift test` binary is unsigned: reaching the Keychain from one either fails with
-/// `errSecMissingEntitlement` or prompts a human, and a test that can prompt is a test that hangs CI.
+/// Nothing here touches the network, and nothing here touches the real Keychain. Every store is
+/// built with `EphemeralCacheKeyStore`, because a `swift test` binary is unsigned: reaching the
+/// Keychain from one either fails with `errSecMissingEntitlement` or prompts a human, and a test
+/// that can prompt is a test that hangs CI.
 ///
 /// Time is injected. There is no `sleep` in this file, so the 30-day TTL is asserted as precisely as
 /// the 1-hour one.
