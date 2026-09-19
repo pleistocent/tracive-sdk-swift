@@ -75,7 +75,7 @@ let tracive = TraciveClient(
     clientId: "your-client-id",
     redirectUri: URL(string: "https://yourapp.example.com/oauth/tracive")!,
     scopes: [TraciveScopes.scammerCheck, TraciveScopes.creditsRead],
-    partnerUserId: currentUser.id,   // optional; echoed back for your own reconciliation
+    partnerUserId: currentUser.id,   // required, never blank: your own stable, opaque id
     clientType: .public              // .confidential if your backend holds a client secret
   ),
   environment: .production
