@@ -39,8 +39,8 @@ warning: this package's tests are XCTest, so that runner legitimately has nothin
 
 ## What CI enforces, and why
 
-Everything below runs on every push and pull request. None of it needs network access — the Tracive
-API is not live, and a test that reached a real host could only be testing somebody else's DNS.
+Everything below runs on every push and pull request. None of it needs network access — a test that
+reached a real host would fail whenever that environment is down or mid-deploy.
 
 - **A Swift 6 toolchain is required, not preferred.** The language-mode gate passes
   `-swift-version 6`, which older toolchains reject. The job fails loudly on an old toolchain rather

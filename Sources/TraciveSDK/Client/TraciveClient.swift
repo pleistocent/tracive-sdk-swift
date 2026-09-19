@@ -26,10 +26,9 @@ import Foundation
 ///
 /// ## Three things to know before integrating
 ///
-/// 1. **The backend does not exist yet.** There is no live `/v1/*` route in
-///    the Tracive API. Everything here is written against the documented
-///    contract and verified against an injected fake transport; no test in this package opens a
-///    socket.
+/// 1. **Sandbox and production are separate registrations.** Each needs a client id issued for
+///    it, with your redirect registered on that client. Everything here is verified against an
+///    injected fake transport; no test in this package opens a socket.
 /// 2. **Every call is billed, including a miss**. That is why queries are validated locally
 ///    before a request goes out, why the cache exists, and why a 5xx is not blindly retried.
 /// 3. **There is no API-key parameter, in any mode**. A mobile binary cannot keep a secret.

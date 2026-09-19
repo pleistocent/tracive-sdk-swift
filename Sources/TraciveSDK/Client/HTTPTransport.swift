@@ -2,11 +2,10 @@ import Foundation
 
 /// The one seam through which every byte of network traffic leaves this SDK.
 ///
-/// **Why this exists.** The Tracive Open API does not exist yet — there is no `api.tracive.id` to
-/// call. Every behaviour in this SDK (request shape, cache routing, token refresh, error
-/// mapping) is therefore specified against an injected transport and verified against a fake, and
-/// no unit test in this package opens a socket. When the backend does ship, nothing about the
-/// tested logic changes: only `URLSessionHTTPTransport` starts getting real answers.
+/// **Why this exists.** Every behaviour in this SDK (request shape, cache routing, token refresh,
+/// error mapping) is specified against an injected transport and verified against a fake, and no
+/// unit test in this package opens a socket, so the suite never depends on either environment
+/// being up. `URLSessionHTTPTransport` is the only part that talks to a real server.
 ///
 /// A conformer must be safe to call from multiple tasks at once — `TraciveClient` is an actor, but
 /// it deliberately does *not* hold the actor while awaiting a response, so two checks can be in

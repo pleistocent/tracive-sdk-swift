@@ -499,8 +499,8 @@ on the next launch. Do that whenever the payload shape or the encryption format 
 
 ## Versioning
 
-SemVer, `0.x` until the API freezes. While the backend is still unreleased, minor versions may make
-breaking changes; they will be listed in `CHANGELOG.md`.
+SemVer, `0.x` until the API freezes. Until then, minor versions may make breaking changes; they will
+be listed in `CHANGELOG.md`.
 
 ## Licence
 

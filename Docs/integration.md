@@ -2,9 +2,9 @@
 
 How to wire the Tracive SDK into an iOS app, end to end.
 
-> **Before you start.** The Tracive Open API is not deployed yet, and phase 1 supports OAuth mode
-> only. You can build, unit-test and ship everything on this page today; you will not get a real
-> verdict back until the backend lands. Nothing in this guide requires a live server.
+> **Before you start.** phase 1 supports OAuth mode only. Build against sandbox first: sandbox and
+> production are separate registrations, each needing a client id issued for it with your redirect
+> registered on that client, and a sandbox client id is unknown to production.
 
 ---
 
@@ -352,8 +352,8 @@ If you specifically want a warm cache to survive a re-login on a single-user dev
 
 ## Testing your integration
 
-Everything below runs with no network and no server, which is just as well, because there is no
-server.
+Everything below runs with no network and no server, so none of it depends on either environment
+being up.
 
 ### Inject a fake transport
 

@@ -145,8 +145,8 @@ public actor TraciveOAuth {
   // MARK: - Init
 
   /// - Parameters:
-  ///   - transport: defaults to `URLSessionHTTPTransport`. Inject a fake in tests — the Open API
-  ///     does not exist yet, so nothing in this SDK's test suite may touch a network.
+  ///   - transport: defaults to `URLSessionHTTPTransport`. Inject a fake in tests: nothing in this
+  ///     SDK's test suite may touch a network.
   ///   - tokenStore: defaults to `KeychainTokenStore` keyed on the client id. `UserDefaults` and
   ///     plain files are forbidden for these credentials.
   ///   - appLauncher: defaults to `UIApplication` on iOS and to a launcher that reports "nothing is

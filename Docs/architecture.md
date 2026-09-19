@@ -6,9 +6,9 @@ This page is for someone who has never seen this package before and wants the sh
 minutes. Everything drawn here is taken from the types in `Sources/TraciveSDK/`; where a diagram
 simplifies, the prose under it says what it left out.
 
-> **Status.** The Tracive Open API is not deployed yet and phase 1 is OAuth mode only. The diagrams
-> describe what the code does, which is written against the frozen contract and exercised against an
-> injected fake transport. See the README for what that means for your integration plan.
+> **Status.** phase 1 is OAuth mode only. The diagrams describe what the code does, which is
+> written against the contract and exercised against an injected fake transport. See the README for
+> what that means for your integration plan.
 
 | | |
 |---|---|

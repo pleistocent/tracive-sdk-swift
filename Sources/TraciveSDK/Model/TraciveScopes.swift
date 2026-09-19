@@ -5,8 +5,7 @@ import Foundation
 /// Prefer these to string literals. A scope name is validated in exactly one place — the
 /// authorization server — and an unrecognised one does not degrade into a narrower grant: the whole
 /// consent request is rejected. A typo is therefore not a smaller permission, it is an integration
-/// that cannot authorize at all, and with the consent endpoint not deployed yet there is nowhere to
-/// discover that but a live server.
+/// that cannot authorize at all, and the only place to discover that is a live consent screen.
 ///
 /// Names are `resource.action`, where the resource is the thing being acted on rather than the
 /// endpoint's path segment. Ask for the narrowest set that works: every extra scope is one more

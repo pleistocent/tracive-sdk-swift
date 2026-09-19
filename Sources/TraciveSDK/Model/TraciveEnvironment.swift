@@ -2,9 +2,9 @@ import Foundation
 
 /// Which Tracive Open API deployment to talk to.
 ///
-/// **The Open API is not live yet.** These hosts are the documented contract; nothing answers on
-/// them today, which is exactly why every unit test in this SDK runs against an injected fake
-/// transport instead of a real endpoint.
+/// Sandbox and production are separate registrations: a client id issued in one is unknown to the
+/// other. Every unit test in this SDK runs against an injected fake transport instead of either
+/// host.
 public enum TraciveEnvironment: Equatable, Hashable, Sendable {
   case production
   case sandbox

@@ -75,8 +75,9 @@ yourself, and keeps the Tracive credential on your server where it belongs.
 
 ## What your gateway will need to implement
 
-Enough detail to build against, subject to the same caveat as everything else here — the upstream API
-is not deployed yet, so treat this as the design and not as an observed contract.
+Enough detail to build against, subject to the same caveat as everything else here — no gateway
+has been exercised against a real deployment, so treat this as the design and not as an observed
+contract.
 
 ### `POST {baseUrl}/scammer-checks`
 

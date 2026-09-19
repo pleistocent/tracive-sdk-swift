@@ -43,7 +43,7 @@ below, and gives us a reasonable window to fix things before going public.
 **Out of scope here** — report these to `security@tracive.id` as well, but they are not defects in
 this package:
 
-- the Tracive backend and the Open API (which, as of this release, is not deployed at all),
+- the Tracive backend and the Open API,
 - the Tracive consumer app,
 - issues that require a jailbroken device *and* physical access *and* the user's passcode.
 
