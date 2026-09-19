@@ -12,14 +12,15 @@ identifier is not billed twice.
 
 Three facts, up front, because each of them changes what you can build this quarter.
 
-### 1. The Tracive Open API is not live yet
+### 1. Sandbox and production are separate registrations
 
-There is no `api.tracive.id` answering requests today. This package is written against the frozen
-contract, and it is complete and tested — but every test in it
-runs against an **injected fake transport**, not a server. Nothing here has been exercised end to
-end against a real deployment, and no test in this repository is allowed to require one.
+Both environments answer — `https://api-sandbox.tracive.id/v1` and `https://api.tracive.id/v1`,
+with consent in the matching build of the Tracive app — and each needs a client id issued for it,
+with your redirect registered on that client. A sandbox client id is unknown to production. Build
+against `.sandbox`; `.production` is the default.
 
-You can integrate, compile, unit-test and ship the wiring now. You cannot get a real verdict yet.
+Every test in this package still runs against an **injected fake transport**, not a server, and no
+test in this repository is allowed to require one.
 
 ### 2. phase 1 is OAuth mode only
 
