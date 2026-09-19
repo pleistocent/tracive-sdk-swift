@@ -18,6 +18,7 @@ import TraciveSDK
 public struct ScammerCheckView: View {
 
   @StateObject private var model: ScammerCheckModel
+  private let isOfflineDemo: Bool
 
   /// Builds the screen with the SDK's real cache in front of a canned offline "server".
   ///
@@ -49,12 +50,17 @@ public struct ScammerCheckView: View {
     let sample = SampleChecker()
     let checker = CacheFirstChecker(cache: cache) { try await sample.check($0) }
     _model = StateObject(wrappedValue: ScammerCheckModel(checker: checker))
+    isOfflineDemo = true
   }
 
   /// Bring your own checker — this is the initialiser a host app would use, passing something that
   /// calls `TraciveClient.checkScammer`.
-  public init(checker: any ScammerChecking) {
+  ///
+  /// `isOfflineDemo` shows the note that results are canned. Leave it false for a real checker, or
+  /// the screen tells the user its live answers are fake.
+  public init(checker: any ScammerChecking, isOfflineDemo: Bool = false) {
     _model = StateObject(wrappedValue: ScammerCheckModel(checker: checker))
+    self.isOfflineDemo = isOfflineDemo
   }
 
   public var body: some View {
@@ -73,7 +79,9 @@ public struct ScammerCheckView: View {
         inputSection
         resultSection
         Spacer(minLength: 8)
-        footer
+        if isOfflineDemo {
+          footer
+        }
       }
       .padding(20)
       .frame(maxWidth: 560, alignment: .leading)

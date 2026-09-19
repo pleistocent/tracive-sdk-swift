@@ -15,7 +15,7 @@ struct TraciveExampleApp: App {
       if let client = Self.liveClient, let environment = ExampleFlavor.current.environment {
         LiveCheckScreen(client: client, environment: environment)
       } else {
-        ScammerCheckView(checker: Self.demoChecker)
+        ScammerCheckView(checker: Self.demoChecker, isOfflineDemo: true)
       }
     }
   }
@@ -86,19 +86,23 @@ struct LiveCheckScreen: View {
   @State private var notice: String?
 
   var body: some View {
-    ScammerCheckView(checker: LiveChecker(client: client))
-      .safeAreaInset(edge: .top) { bar }
-      // Every incoming URL goes to the SDK, which answers nil for anything that is not its own
-      // redirect. This is also where the outcome of a flow arrives after iOS terminated this app
-      // while the user was in the Tracive app.
-      .onOpenURL { url in
-        Task {
-          // TODO(partner): nil means not a Tracive redirect — route it to the rest of your app.
-          guard let result = await client.handleCallback(url: url) else { return }
-          show(result)
-        }
+    // Stacked rather than a top safe-area inset: an inset lays the bar over the navigation bar's
+    // large title instead of pushing it down.
+    VStack(spacing: 0) {
+      bar
+      ScammerCheckView(checker: LiveChecker(client: client))
+    }
+    // Every incoming URL goes to the SDK, which answers nil for anything that is not its own
+    // redirect. This is also where the outcome of a flow arrives after iOS terminated this app
+    // while the user was in the Tracive app.
+    .onOpenURL { url in
+      Task {
+        // TODO(partner): nil means not a Tracive redirect — route it to the rest of your app.
+        guard let result = await client.handleCallback(url: url) else { return }
+        show(result)
       }
-      .task { authorized = await client.isAuthorized }
+    }
+    .task { authorized = await client.isAuthorized }
   }
 
   private var bar: some View {
