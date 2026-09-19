@@ -1,0 +1,7 @@
+// The production flavor: the `production` scheme. See demo.xcconfig.
+TRACIVE_FLAVOR = production
+PRODUCT_BUNDLE_IDENTIFIER = id.tracive.sdk.sample.swift.production
+TRACIVE_DISPLAY_NAME = Tracive Swift
+
+// TODO(partner): your own production redirect scheme, registered on your production client id.
+TRACIVE_REDIRECT_SCHEME = tracive-swift

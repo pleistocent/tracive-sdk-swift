@@ -5,25 +5,45 @@ import TraciveSDK
 /// Hosts `ScammerCheckView` so the example can actually be run on a simulator or a device.
 ///
 /// Everything on screen comes from the `TraciveExample` library; this file is only the composition
-/// root — the place a real app builds its dependencies and hands them to the UI.
+/// root — the place a real app builds its dependencies and hands them to the UI. The flavor decides
+/// which dependencies: the offline stub for `demo`, a real `TraciveClient` for the other two.
 @main
 struct TraciveExampleApp: App {
 
   var body: some Scene {
     WindowGroup {
-      ScammerCheckView(checker: Self.checker)
+      if let client = Self.liveClient, let environment = ExampleFlavor.current.environment {
+        LiveCheckScreen(client: client, environment: environment)
+      } else {
+        ScammerCheckView(checker: Self.demoChecker)
+      }
     }
+  }
+
+  /// Built once, like the demo checker below. The initialiser opens the on-disk cache synchronously,
+  /// which is acceptable for an example; see `TraciveClient.init` if it is not for your launch.
+  private static let liveClient: TraciveClient? = ExampleFlavor.current.environment.map {
+    TraciveClient(
+      mode: .oauth(
+        clientId: ExampleFlavor.current.clientId,
+        redirectUri: ExampleFlavor.current.redirectUri,
+        // TODO(partner): the narrowest set your integration needs.
+        scopes: [TraciveScopes.scammerCheck],
+        // TODO(partner): your own stable, opaque id for this user — never a phone number or an
+        // email.
+        partnerUserId: "partner-user-1"
+      ),
+      environment: $0
+    )
   }
 
   /// Built once. `body` can be evaluated more than once, and opening a database per evaluation
   /// would be a new empty cache each time.
-  private static let checker: any ScammerChecking = makeChecker()
+  private static let demoChecker: any ScammerChecking = makeDemoChecker()
 
-  // TODO(partner): this is the seam. Build a `TraciveClient`, return your own `ScammerChecking` over
-  // `client.checkScammer`, and drop `CacheFirstChecker` — `Source.cacheFirst` already does that
-  // inside the client. Nothing in the UI changes. The stub stays the default so a fresh clone still
-  // runs with no credentials.
-  private static func makeChecker() -> any ScammerChecking {
+  /// The demo's stub. The live flavors show the real seam: `LiveChecker` over `checkScammer`, where
+  /// `Source.cacheFirst` does what `CacheFirstChecker` spells out here.
+  private static func makeDemoChecker() -> any ScammerChecking {
     let sample = SampleChecker()
     return CacheFirstChecker(cache: makeCache()) { try await sample.check($0) }
   }
@@ -44,6 +64,92 @@ struct TraciveExampleApp: App {
       // check would simply read "Just checked" and look like a cache miss rather than a refusal.
       print("[TraciveExample] on-disk cache unavailable — caching is off for this run: \(error)")
       return NoOpCheckCache()
+    }
+  }
+}
+
+/// The real seam, in the one line a partner writes.
+struct LiveChecker: ScammerChecking {
+  let client: TraciveClient
+  func check(_ query: TraciveQuery) async throws -> CheckResult {
+    try await client.checkScammer(query)
+  }
+}
+
+/// The sandbox and production flavors: the same screen, over a real client, with the OAuth controls
+/// the demo does not need.
+struct LiveCheckScreen: View {
+  let client: TraciveClient
+  let environment: TraciveEnvironment
+
+  @State private var authorized = false
+  @State private var notice: String?
+
+  var body: some View {
+    ScammerCheckView(checker: LiveChecker(client: client))
+      .safeAreaInset(edge: .top) { bar }
+      // Every incoming URL goes to the SDK, which answers nil for anything that is not its own
+      // redirect. This is also where the outcome of a flow arrives after iOS terminated this app
+      // while the user was in the Tracive app.
+      .onOpenURL { url in
+        Task {
+          // TODO(partner): nil means not a Tracive redirect — route it to the rest of your app.
+          guard let result = await client.handleCallback(url: url) else { return }
+          show(result)
+        }
+      }
+      .task { authorized = await client.isAuthorized }
+  }
+
+  private var bar: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("\(ExampleFlavor.current.rawValue) · \(environment.baseUrl.absoluteString)")
+        .font(.footnote.weight(.semibold))
+        .foregroundColor(.accentColor)
+      HStack {
+        Button(authorized ? "Authorized" : "Authorize") {
+          notice = "Consent screen opened. Finish it in the Tracive app."
+          // Suspends until the redirect reaches handleCallback above, then answers the same result.
+          Task { show(await client.authorize()) }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(authorized)
+        Button("Sign out") {
+          Task {
+            await client.signOut()
+            authorized = false
+            notice = "Signed out. The grant and the cached verdicts are gone."
+          }
+        }
+        .buttonStyle(.bordered)
+        .disabled(!authorized)
+      }
+      if let notice {
+        Text(notice).font(.footnote).foregroundColor(.secondary)
+      }
+    }
+    .padding(.horizontal, 20)
+    .padding(.vertical, 8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(.bar)
+  }
+
+  @MainActor
+  private func show(_ result: AuthResult) {
+    switch result {
+    case .authorized(let scopes):
+      authorized = true
+      notice = "Authorized. Scopes granted: \(scopes.joined(separator: ", "))"
+    case .codeReceived:
+      // Only reachable for a confidential client; this example is public.
+      // TODO(partner): forward the code and verifier over TLS to your backend.
+      notice = "Authorization code received. Forward it to your backend."
+    case .denied:
+      notice = "You declined the request."
+    case .appNotInstalled:
+      notice = "Install the Tracive app first — the install page has been opened."
+    case .failed(let error):
+      notice = error.localizedDescription
     }
   }
 }

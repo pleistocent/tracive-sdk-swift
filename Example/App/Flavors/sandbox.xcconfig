@@ -1,0 +1,8 @@
+// The sandbox flavor: the `sandbox` scheme. See demo.xcconfig.
+TRACIVE_FLAVOR = sandbox
+PRODUCT_BUNDLE_IDENTIFIER = id.tracive.sdk.sample.swift.sandbox
+TRACIVE_DISPLAY_NAME = Swift Sandbox
+
+// TODO(partner): your own sandbox redirect scheme, registered on your sandbox client id — or a
+// Universal Link on a host you own, which Docs/integration.md recommends.
+TRACIVE_REDIRECT_SCHEME = tracive-swift-sandbox

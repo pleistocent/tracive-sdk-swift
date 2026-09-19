@@ -20,9 +20,12 @@
     as one run-on word, while 15 characters still renders in full. The name says the platform rather
     than repeating "SDK", which the ribbon on the icon already carries, so this one reads next to
     "Tracive KMP", "Tracive Flutter" and "Tracive RN" on a device that has several of them.
+
+    Per flavor, from Flavors/*.xcconfig: "Tracive Swift" for production, "Swift Sandbox" and
+    "Swift Demo" for the other two.
   -->
   <key>CFBundleDisplayName</key>
-  <string>Tracive Swift</string>
+  <string>$(TRACIVE_DISPLAY_NAME)</string>
   <key>CFBundleName</key>
   <string>$(PRODUCT_NAME)</string>
   <key>CFBundlePackageType</key>
@@ -44,8 +47,8 @@
     canOpenURL answers false on every device, installed or not.
 
     Both entries because the probe follows `environment`: `tracive` is the production app,
-    `tracivedev` the sandbox build. This demo never runs OAuth, so nothing here exercises the key —
-    it is present because this plist is the one a partner copies. See Docs/integration.md.
+    `tracivedev` the sandbox build — the sandbox and production flavors use one each. See
+    Docs/integration.md.
   -->
   <key>LSApplicationQueriesSchemes</key>
   <array>
@@ -54,8 +57,32 @@
   </array>
 
   <!--
-    TODO(partner): add CFBundleURLTypes for your OAuth redirect, or better, an `applinks:`
-    entitlement for a host you own. There is none here because the example never leaves the device.
+    The flavor, and the OAuth redirect the live flavors configure the SDK with. Sources/Flavor.swift
+    reads both. The redirect is assembled here from the same scheme CFBundleURLTypes registers, so
+    the two cannot drift apart.
   -->
+  <key>TraciveFlavor</key>
+  <string>$(TRACIVE_FLAVOR)</string>
+  <key>TraciveRedirectURI</key>
+  <string>$(TRACIVE_REDIRECT_SCHEME)://oauth/callback</string>
+
+  <!--
+    A private-use scheme only because this example controls no domain. Any app can claim one.
+    TODO(partner): an `applinks:` entitlement for a host you own, with TraciveRedirectURI pointing
+    at it.
+  -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleURLName</key>
+      <string>$(PRODUCT_BUNDLE_IDENTIFIER).oauth</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>$(TRACIVE_REDIRECT_SCHEME)</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

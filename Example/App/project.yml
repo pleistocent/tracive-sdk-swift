@@ -14,6 +14,16 @@
 # way the README tells a partner to.
 name: TraciveSwiftExample
 
+# One Debug and one Release per flavor. Sources/Flavor.swift says what each flavor is for; the
+# per-flavor values live in Flavors/*.xcconfig.
+configs:
+  Debug-demo: debug
+  Release-demo: release
+  Debug-sandbox: debug
+  Release-sandbox: release
+  Debug-production: debug
+  Release-production: release
+
 options:
   bundleIdPrefix: id.tracive.sdk
   deploymentTarget:
@@ -44,12 +54,20 @@ targets:
       - package: TraciveExample
         product: TraciveExample
 
+    # PRODUCT_BUNDLE_IDENTIFIER comes from these, and must not be set in `settings` below: a
+    # target-level value would override it. Each one is distinct from the KMP sample's
+    # `id.tracive.sdk.sample…`, because the samples are meant to sit on the same device — the point
+    # of the ribbon on the icon.
+    configFiles:
+      Debug-demo: Flavors/demo.xcconfig
+      Release-demo: Flavors/demo.xcconfig
+      Debug-sandbox: Flavors/sandbox.xcconfig
+      Release-sandbox: Flavors/sandbox.xcconfig
+      Debug-production: Flavors/production.xcconfig
+      Release-production: Flavors/production.xcconfig
+
     settings:
       base:
-        # Distinct from the KMP sample's `id.tracive.sdk.sample`. The two are meant to sit on the
-        # same device — the point of the ribbon on the icon — and a shared bundle id would make
-        # installing one uninstall the other.
-        PRODUCT_BUNDLE_IDENTIFIER: id.tracive.sdk.sample.swift
         INFOPLIST_FILE: Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         # Empty here yields a home screen icon that is a grey grid, with no error at build,
@@ -60,5 +78,40 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         MARKETING_VERSION: "0.1.0"
 
-    scheme:
-      testTargets: []
+schemes:
+  demo:
+    build:
+      targets:
+        TraciveSwiftExample: all
+    run:
+      config: Debug-demo
+    profile:
+      config: Release-demo
+    analyze:
+      config: Debug-demo
+    archive:
+      config: Release-demo
+  sandbox:
+    build:
+      targets:
+        TraciveSwiftExample: all
+    run:
+      config: Debug-sandbox
+    profile:
+      config: Release-sandbox
+    analyze:
+      config: Debug-sandbox
+    archive:
+      config: Release-sandbox
+  production:
+    build:
+      targets:
+        TraciveSwiftExample: all
+    run:
+      config: Debug-production
+    profile:
+      config: Release-production
+    analyze:
+      config: Debug-production
+    archive:
+      config: Release-production

@@ -268,16 +268,21 @@ jobs:
         # Verified to be capable of failing: a build with `ASSETCATALOG_COMPILER_APPICON_NAME=""`
         # still reports BUILD SUCCEEDED, and both assertions below fire on it — no `Assets.car` in
         # the bundle and no `CFBundleIconName` in its Info.plist.
+        #
+        # One build per flavor scheme: each has its own configuration and xcconfig, so one of them
+        # passing says nothing about the other two.
         working-directory: Example/App
         run: |
-          xcodebuild \
-            -project TraciveSwiftExample.xcodeproj \
-            -scheme TraciveSwiftExample \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath DerivedData \
-            build
-          app="DerivedData/Build/Products/Debug-iphonesimulator/TraciveSwiftExample.app"
-          test -f "$app/Assets.car" \
-            || { echo "::error::no Assets.car in the built app — the asset catalog is not in the Resources build phase."; exit 1; }
-          plutil -p "$app/Info.plist" | grep -q '"CFBundleIconName" => "AppIcon"' \
-            || { echo "::error::CFBundleIconName missing from the built app — ASSETCATALOG_COMPILER_APPICON_NAME did not resolve, and the home-screen icon will be a grey placeholder."; exit 1; }
+          for flavor in demo sandbox production; do
+            xcodebuild \
+              -project TraciveSwiftExample.xcodeproj \
+              -scheme "$flavor" \
+              -destination 'generic/platform=iOS Simulator' \
+              -derivedDataPath DerivedData \
+              build
+            app="DerivedData/Build/Products/Debug-$flavor-iphonesimulator/TraciveSwiftExample.app"
+            test -f "$app/Assets.car" \
+              || { echo "::error::$flavor: no Assets.car in the built app — the asset catalog is not in the Resources build phase."; exit 1; }
+            plutil -p "$app/Info.plist" | grep -q '"CFBundleIconName" => "AppIcon"' \
+              || { echo "::error::$flavor: CFBundleIconName missing from the built app — ASSETCATALOG_COMPILER_APPICON_NAME did not resolve, and the home-screen icon will be a grey placeholder."; exit 1; }
+          done

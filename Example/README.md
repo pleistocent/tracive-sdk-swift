@@ -73,18 +73,43 @@ Xcode project involved. `App/` is an iOS app target that hosts the same views, s
 also be installed and run:
 
 ```bash
-open App/TraciveSwiftExample.xcodeproj      # then ⌘R
+open App/TraciveSwiftExample.xcodeproj      # pick a scheme, then ⌘R
 ```
 
 Or from a terminal:
 
 ```bash
-xcodebuild -project App/TraciveSwiftExample.xcodeproj -scheme TraciveSwiftExample \
+xcodebuild -project App/TraciveSwiftExample.xcodeproj -scheme demo \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 ```
 
-It installs as **Tracive Swift**, wearing the Tracive icon with a red `SDK` ribbon so it is not
-mistaken for the real Tracive app on a device that has both.
+### Three flavors, one scheme each
+
+| Scheme | Talks to | Installs as |
+|---|---|---|
+| `demo` | nothing — `SampleChecker`, in-process | `id.tracive.sdk.sample.swift`, "Swift Demo" |
+| `sandbox` | `https://api-sandbox.tracive.id/v1` | `….swift.sandbox`, "Swift Sandbox" |
+| `production` | `https://api.tracive.id/v1` | `….swift.production`, "Tracive Swift" |
+
+`demo` is the offline stub described above. `sandbox` and `production` are the real integration: a
+`TraciveClient` for that environment behind the same screen (`LiveChecker`), with **Authorize**,
+which runs the OAuth round trip through the Tracive app and back through `.onOpenURL`. Put the
+client id Tracive issued you for each environment in `App/Sources/Flavor.swift`, and register that
+flavor's redirect on it — they are separate registrations, and a sandbox client id is unknown to
+production.
+
+Each flavor installs as its own app. The SDK's token store and cache are not keyed by environment,
+so one app rebuilt for another environment would send the old grant there and serve the old
+verdicts as its answers. The demo keeps the original bundle id because that is where earlier
+installs keep their cache of canned verdicts.
+
+The per-flavor values — bundle id, display name, redirect scheme — live in `App/Flavors/*.xcconfig`,
+and `Info.plist` hands the flavor and the redirect to `Flavor.swift`. The redirects are private-use
+schemes (`tracive-swift-sandbox://oauth/callback`) only because this example controls no domain; a
+real integration uses a Universal Link it owns — see [`../Docs/integration.md`](../Docs/integration.md).
+
+Every flavor wears the Tracive icon with a red `SDK` ribbon so it is not mistaken for the real
+Tracive app on a device that has both.
 
 The project is generated from [`App/project.yml`](App/project.yml) by
 [XcodeGen](https://github.com/yonaskolb/XcodeGen) and committed so the repository can be opened
@@ -102,11 +127,11 @@ backed by the on-disk `SQLiteCheckCache` and `KeychainCacheKeyStore`, because th
 app sandbox and a Keychain to exist at all. Check a number, relaunch, check it again: a **Cached**
 badge after a cold start is the data key surviving the process.
 
-That same composition root is where a real `TraciveClient` would be injected — the app passes a
-`ScammerChecking`, so pointing this screen at a live environment is one type, not an edit to the UI.
-The stub stays the default: an example that needs credentials and a reachable host is one nobody can
+That same composition root is where the live flavors inject a real `TraciveClient` — the app passes
+a `ScammerChecking`, so pointing this screen at a live environment is one type, not an edit to the
+UI. The demo stays the stub: an example that needs credentials and a reachable host is one nobody can
 run on a fresh clone.
 
-For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive` (the app's
-`Info.plist` has it) and a Universal Link redirect URI — see
+For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive` and
+`tracivedev` (the app's `Info.plist` has both) and a Universal Link redirect URI — see
 [`../Docs/integration.md`](../Docs/integration.md).

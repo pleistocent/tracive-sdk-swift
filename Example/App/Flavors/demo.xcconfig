@@ -1,0 +1,14 @@
+// The demo flavor: the `demo` scheme. Sources/Flavor.swift says what each flavor is for and why
+// each installs as its own app.
+//
+// The demo keeps the original bundle id because that is where earlier installs keep their on-disk
+// cache of canned verdicts; a live build installed over it would serve them as real answers.
+//
+// No `://` in any value: xcconfig reads `//` as the start of a comment wherever it appears.
+TRACIVE_FLAVOR = demo
+PRODUCT_BUNDLE_IDENTIFIER = id.tracive.sdk.sample.swift
+TRACIVE_DISPLAY_NAME = Swift Demo
+
+// Unused: the demo never authorizes. Set only because Info.plist declares a redirect scheme for
+// every flavor.
+TRACIVE_REDIRECT_SCHEME = tracive-swift-demo
