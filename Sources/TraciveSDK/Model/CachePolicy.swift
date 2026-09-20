@@ -14,10 +14,6 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
   public var elevatedTtl: TimeInterval
   public var cautionTtl: TimeInterval
   public var noneTtl: TimeInterval
-  /// Whether `CheckResult.cacheTtlSeconds` overrides the per-tier default. Leave this on: it is the
-  /// server's fleet-wide invalidation lever. Turning it off pins clients to local defaults and
-  /// makes a bad cached verdict un-revocable.
-  public var honorsServerTtlOverride: Bool
   /// Cap on stored rows. Enforced after every write and by the prune pass; `nil` means unbounded.
   ///
   /// **The default is 5 000, and an unbounded default would be the wrong one.** This is an
@@ -48,9 +44,6 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
   /// screen goes back further — and raise `maxEntries` with it, since records are counted by the
   /// same cap as cache entries.
   ///
-  /// `cacheTtlSeconds` is deliberately not applied to these. That field retracts a verdict the
-  /// backend no longer stands behind, which is the wrong lever for a record of what a user was
-  /// already shown.
   public var transactionCheckRetention: TimeInterval
 
   public init(
@@ -59,7 +52,6 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
     elevatedTtl: TimeInterval = 7 * 24 * 60 * 60,
     cautionTtl: TimeInterval = 24 * 60 * 60,
     noneTtl: TimeInterval = 60 * 60,
-    honorsServerTtlOverride: Bool = true,
     maxEntries: Int? = 5_000,
     transactionCheckRetention: TimeInterval = 90 * 24 * 60 * 60
   ) {
@@ -68,7 +60,6 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
     self.elevatedTtl = elevatedTtl
     self.cautionTtl = cautionTtl
     self.noneTtl = noneTtl
-    self.honorsServerTtlOverride = honorsServerTtlOverride
     self.maxEntries = maxEntries
     self.transactionCheckRetention = transactionCheckRetention
   }
@@ -79,7 +70,11 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
   /// No local caching at all.
   public static let disabled = CachePolicy(isEnabled: false)
 
-  /// The default TTL for a tier, ignoring any server override.
+  /// How long a result of this tier stays usable — the whole of the cache's lifetime policy.
+  ///
+  /// There is no per-response override. The backend used to be able to send a `cacheTtlSeconds`
+  /// that replaced this, which duplicated the ladder below on the server; cache lifetime is the
+  /// SDK's own business, so a host that wants different numbers sets them here.
   public func ttl(for tier: RiskTier) -> TimeInterval {
     switch tier {
     case .high: return highTtl
@@ -89,22 +84,9 @@ public struct CachePolicy: Equatable, Hashable, Sendable {
     }
   }
 
-  /// The TTL actually applied to a result: the server's `cacheTtlSeconds` when it sent one and
-  /// overrides are honoured, otherwise the per-tier default. Negative values clamp to zero, which
-  /// makes the entry stale immediately rather than eternally fresh.
-  public func effectiveTtl(for tier: RiskTier, serverTtlSeconds: Int64?) -> TimeInterval {
-    guard honorsServerTtlOverride, let serverTtlSeconds else { return ttl(for: tier) }
-    return max(0, TimeInterval(serverTtlSeconds))
-  }
-
-  /// Convenience over `effectiveTtl(for:serverTtlSeconds:)` for a decoded result.
-  public func effectiveTtl(for result: CheckResult) -> TimeInterval {
-    effectiveTtl(for: result.riskTier, serverTtlSeconds: result.cacheTtlSeconds)
-  }
-
   /// Whether a stored result is still fresh at `now`.
   public func isFresh(_ result: CheckResult, now: Date) -> Bool {
     guard isEnabled else { return false }
-    return now.timeIntervalSince(result.fetchedAt) < effectiveTtl(for: result)
+    return now.timeIntervalSince(result.fetchedAt) < ttl(for: result.riskTier)
   }
 }

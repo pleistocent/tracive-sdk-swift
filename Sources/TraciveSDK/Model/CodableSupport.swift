@@ -31,14 +31,6 @@ extension KeyedDecodingContainer {
     traciveIntIfPresent(key) ?? defaultValue
   }
 
-  /// Reads an `Int64` (used for `cacheTtlSeconds`), tolerating double/string encodings.
-  func traciveInt64IfPresent(_ key: Key) -> Int64? {
-    if let value = try? decodeIfPresent(Int64.self, forKey: key) { return value }
-    if let value = try? decodeIfPresent(Double.self, forKey: key) { return Int64(value) }
-    if let value = try? decodeIfPresent(String.self, forKey: key) { return Int64(value) }
-    return nil
-  }
-
   /// Reads a `Bool`, tolerating `0`/`1` and `"true"`/`"false"`.
   func traciveBool(_ key: Key, default defaultValue: Bool) -> Bool {
     if let value = try? decodeIfPresent(Bool.self, forKey: key) { return value }

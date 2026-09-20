@@ -303,12 +303,15 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 2)
   }
 
-  func testServerTTLOverrideBeatsTheTierDefault() async throws {
+  /// A `cacheTtlSeconds` still on the wire is ignored, and does not break the decode.
+  ///
+  /// The backend stopped sending it (pleistocent-firebase@88fd6f9) and the SDK no longer models it,
+  /// but a proxy or an old deployment may still. Two things have to hold: the response decodes, and
+  /// the tier ladder decides the lifetime — so a HIGH answer with a ten-second directive on it is
+  /// still served from the cache thirty seconds later, with no second call.
+  func testACacheTtlSecondsStillOnTheWireIsIgnored() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
-    // HIGH would normally be cached for thirty days; the server says ten seconds. `cacheTtlSeconds`
-    // is the fleet-wide invalidation lever — if this test fails, Tracive has lost its only way
-    // to revoke a bad verdict without shipping an SDK release.
     let transport = FakeHTTPTransport { _, _ in
       .ok(json: #"{"found":true,"riskTier":"HIGH","reportTotal":9,"cacheTtlSeconds":10}"#)
     }
@@ -316,10 +319,11 @@ final class ClientTests: XCTestCase {
 
     _ = try await client.checkScammer(TestQueries.phone, source: .cacheFirst)
     clock.advance(by: 30)
-    let refetched = try await client.checkScammer(TestQueries.phone, source: .cacheFirst)
+    let replayed = try await client.checkScammer(TestQueries.phone, source: .cacheFirst)
 
-    XCTAssertEqual(refetched.origin, .server)
-    XCTAssertEqual(transport.callCount, 2)
+    XCTAssertEqual(replayed.origin, .cache)
+    XCTAssertEqual(replayed.reportTotal, 9)
+    XCTAssertEqual(transport.callCount, 1)
   }
 
   /// What reaches disk is `cacheableCopy()`, never the response as it arrived.

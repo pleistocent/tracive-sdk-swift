@@ -47,7 +47,6 @@ final class CacheTests: XCTestCase {
   private func makeResult(
     tier: RiskTier = .high,
     fetchedAt: Date = CacheTests.t0,
-    cacheTtlSeconds: Int64? = nil,
     checkId: String? = "chk_123",
     found: Bool = true,
     reportTotal: Int = 7,
@@ -71,7 +70,6 @@ final class CacheTests: XCTestCase {
       topChronologies: topChronologies,
       comments: comments,
       billing: billing,
-      cacheTtlSeconds: cacheTtlSeconds,
       disclaimer: disclaimer,
       origin: .server,
       fetchedAt: fetchedAt
@@ -223,58 +221,35 @@ final class CacheTests: XCTestCase {
 
   // MARK: - Server-driven TTL override (the fleet-wide invalidation lever)
 
-  func testServerTtlOverridesTheTierDefault() throws {
+  /// A host's configured TTL is the only lifetime policy — a shorter one has to be obeyed.
+  func testAHostsShorterTierTtlIsObeyed() throws {
     let clock = TestClock(CacheTests.t0)
-    let cache = try SQLiteCheckCache.inMemory(now: clock.provider)
+    var policy = CachePolicy.default
+    policy.highTtl = 60
+    let cache = try SQLiteCheckCache.inMemory(policy: policy, now: clock.provider)
     let query = try makeQuery()
 
-    // HIGH would normally be held for 30 days. The server says 60 seconds; that must win, because it
-    // is how Tracive invalidates a bad verdict across every installed app without shipping a release.
-    try cache.write(makeResult(tier: .high, cacheTtlSeconds: 60), for: query)
+    try cache.write(makeResult(tier: .high), for: query)
 
     clock.now = CacheTests.t0.addingTimeInterval(59)
     XCTAssertNotNil(try cache.read(query))
 
     clock.now = CacheTests.t0.addingTimeInterval(61)
-    XCTAssertNil(try cache.read(query), "cacheTtlSeconds must override the 30-day HIGH default")
+    XCTAssertNil(try cache.read(query), "a configured 60-second HIGH TTL must beat the 30-day default")
   }
 
-  /// The override can also *extend* a TTL — a NONE verdict the server is confident about.
-  func testServerTtlCanExtendAsWellAsShorten() throws {
+  /// A zero tier TTL means "do not keep this at all". It must not read as "no TTL configured".
+  func testAZeroTierTtlMakesTheEntryImmediatelyStale() throws {
     let clock = TestClock(CacheTests.t0)
-    let cache = try SQLiteCheckCache.inMemory(now: clock.provider)
-    let query = try makeQuery()
-
-    try cache.write(makeResult(tier: .none, cacheTtlSeconds: 7 * 24 * 60 * 60), for: query)
-
-    clock.now = CacheTests.t0.addingTimeInterval(3 * 24 * 60 * 60)
-    XCTAssertNotNil(try cache.read(query), "NONE's 1-hour default must yield to a longer server TTL")
-  }
-
-  /// `cacheTtlSeconds = 0` means "do not reuse this". It must not read as "no override".
-  func testZeroServerTtlMakesTheEntryImmediatelyStale() throws {
-    let clock = TestClock(CacheTests.t0)
-    let cache = try SQLiteCheckCache.inMemory(now: clock.provider)
-    let query = try makeQuery()
-
-    try cache.write(makeResult(tier: .high, cacheTtlSeconds: 0), for: query)
-    XCTAssertNil(try cache.read(query), "a zero TTL must not fall back to the 30-day tier default")
-  }
-
-  func testServerTtlIsIgnoredWhenTheOverrideIsTurnedOff() throws {
-    let clock = TestClock(CacheTests.t0)
-    let policy = CachePolicy(honorsServerTtlOverride: false)
+    var policy = CachePolicy.default
+    policy.highTtl = 0
     let cache = try SQLiteCheckCache.inMemory(policy: policy, now: clock.provider)
     let query = try makeQuery()
 
-    try cache.write(makeResult(tier: .high, cacheTtlSeconds: 60), for: query)
-
-    clock.now = CacheTests.t0.addingTimeInterval(120)
-    XCTAssertNotNil(
-      try cache.read(query),
-      "with the override disabled the 30-day tier default applies instead"
-    )
+    try cache.write(makeResult(tier: .high), for: query)
+    XCTAssertNil(try cache.read(query), "a zero TTL must not fall back to the 30-day tier default")
   }
+
 
   /// Freshness is decided on read from the *current* policy, not from whatever was in force when the
   /// row was written. That is what lets a host app tighten its policy and have it take effect on

@@ -35,8 +35,7 @@ import Foundation
 ///
 /// ## Freshness: read is authoritative, prune is best-effort
 /// `read` decides staleness with the **current** `policy` applied to the decoded result, via
-/// `CachePolicy.isFresh(_:now:)` — so it honours a `cacheTtlSeconds` the server sent (the
-/// fleet-wide invalidation lever) and reacts immediately to a policy change. `expires_at` is only an
+/// `CachePolicy.isFresh(_:now:)` — so it reacts immediately to a policy change. `expires_at` is only an
 /// index for `prune`, computed from whatever policy was in force at write time. The split matters:
 /// prune may leave a stale row behind for a while, and read will still refuse to serve it. It can
 /// never go the other way.
@@ -172,7 +171,7 @@ public final class SQLiteCheckCache: CheckCache, @unchecked Sendable {
     // Expiry is measured from when the *data* was fetched, not from now — matching
     // `CachePolicy.isFresh`, which compares `now - fetchedAt`. Measuring from the write instant
     // would silently extend the life of a result that sat in a response queue.
-    let expiresAt = entry.fetchedAt.addingTimeInterval(policy.effectiveTtl(for: entry))
+    let expiresAt = entry.fetchedAt.addingTimeInterval(policy.ttl(for: entry.riskTier))
 
     try connection.transaction {
       let statement = try connection.prepare(

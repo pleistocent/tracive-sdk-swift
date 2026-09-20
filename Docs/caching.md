@@ -132,21 +132,15 @@ maintains.
 | `CAUTION` | 24 hours | |
 | `NONE` | 1 hour | The most volatile answer there is — today's clean number is tomorrow's scammer. |
 
-### The server override wins
+### The tier ladder is the whole policy
 
-When a response carries `cacheTtlSeconds`, it **replaces** the tier default:
+`policy.ttl(for:)` is the lifetime, and nothing in a response can change it. The backend used to be
+able to send a `cacheTtlSeconds` that replaced the tier default; that duplicated the table above on
+the server, so it is gone. A `cacheTtlSeconds` still arriving from a proxy is a key the model does
+not have, and `Codable` skips it rather than failing the decode.
 
-```json
-{ "riskTier": "HIGH", "cacheTtlSeconds": 60 }
-```
-
-This is Tracive's fleet-wide invalidation lever. A verdict that turns out to be wrong — a
-false-positive report, a number that changed hands — can be pulled back from every installed app
-within a minute, without shipping a release to anyone. Honour it. `cacheTtlSeconds: 0` means "do not
-reuse this at all", and is not the same as "no override".
-
-You can turn it off (`CachePolicy(honorsServerTtlOverride: false)`), but you should not. Pinning
-clients to local defaults makes a bad cached verdict un-revocable.
+Set your own numbers if you want different ones. A tier TTL of `0` means "do not keep answers of
+this tier": nothing is stored, and any row already held for that query is removed.
 
 ### Read is authoritative, prune is best-effort
 
@@ -294,7 +288,6 @@ UI knows that transfer spent nothing.
 |---|---|---|
 | Keyed on | the identifier | your transaction id, hashed, under a `txn:` prefix |
 | Lifetime | tier TTL, 1 hour to 30 days | `transactionCheckRetention`, 90 days by default |
-| Server `cacheTtlSeconds` | applied, including retraction | **not applied** — a record of the past cannot be retracted |
 | Overwritten by a later check | yes | no |
 | `origin` on read | restamped `.cache` | kept as recorded |
 | `checkId`, `billing` | dropped | kept — this record *is* that one call |
@@ -341,7 +334,6 @@ let client = TraciveClient(
     elevatedTtl: 7 * 24 * 60 * 60,
     cautionTtl: 24 * 60 * 60,
     noneTtl: 60 * 60,
-    honorsServerTtlOverride: true,   // leave this on
     maxEntries: 5_000                // the default; nil = unbounded
   )
 )

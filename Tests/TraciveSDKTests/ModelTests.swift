@@ -66,7 +66,6 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(result.billing?.creditSource, .user)
     XCTAssertEqual(result.billing?.unitsCharged, 1)
     XCTAssertNil(result.billing?.partnerBalanceRemaining)
-    XCTAssertEqual(result.cacheTtlSeconds, 3600)
     XCTAssertEqual(result.disclaimer, "Informational only; verify independently.")
 
     // Provenance is SDK-side: a server payload carries neither field.
@@ -91,7 +90,6 @@ final class ModelTests: XCTestCase {
     XCTAssertNil(result.topChronologies)
     XCTAssertNil(result.comments)
     XCTAssertNil(result.billing)
-    XCTAssertNil(result.cacheTtlSeconds)
   }
 
   /// Forward compatibility: a future-version server may add fields; shipped apps must not break.
@@ -139,8 +137,10 @@ final class ModelTests: XCTestCase {
     let result = try decode(CheckResult.self, json)
     XCTAssertEqual(result.reportTotal, 7)
     XCTAssertEqual(result.credibleReports, 4)
-    XCTAssertEqual(result.cacheTtlSeconds, 900)
     XCTAssertNil(result.firstReportOn)
+    // `cacheTtlSeconds` is retired and no longer a property. It stays in the payload above because
+    // a server or proxy may still send it, and `Codable` must skip an unmodelled key rather than
+    // throw — if it threw, `decode` would have failed before any assertion here ran.
   }
 
   func testIso8601AcceptsWholeSecondsFractionsAndOffsets() throws {
@@ -165,7 +165,6 @@ final class ModelTests: XCTestCase {
       topChronologies: [Chronology(chronology: "c", riskLevel: 1)],
       comments: [Comment(date: "2026-01-01", text: "t", fromCredibleReport: true)],
       billing: Billing(creditSource: .user, unitsCharged: 1),
-      cacheTtlSeconds: 60,
       disclaimer: "d",
       origin: .server,
       fetchedAt: try instant("2026-07-09T10:00:00Z")
@@ -182,7 +181,6 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(cached.found, result.found)
     XCTAssertEqual(cached.riskTier, result.riskTier)
     XCTAssertEqual(cached.reportTotal, result.reportTotal)
-    XCTAssertEqual(cached.cacheTtlSeconds, result.cacheTtlSeconds)
     XCTAssertEqual(cached.disclaimer, result.disclaimer)
     XCTAssertEqual(cached.fetchedAt, result.fetchedAt)
     XCTAssertEqual(cached.origin, .cache)
@@ -214,7 +212,6 @@ final class ModelTests: XCTestCase {
       fraudAmount: ["IDR": 5_000_000],
       tags: ["telegram"],
       relatedScammerCount: 2,
-      cacheTtlSeconds: 2_592_000,
       disclaimer: "Informational only.",
       origin: .cache,
       fetchedAt: try instant("2026-07-09T11:22:33Z")
@@ -237,7 +234,6 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(policy.ttl(for: .caution), 24 * 60 * 60)
     XCTAssertEqual(policy.ttl(for: RiskTier.none), 60 * 60)
     XCTAssertTrue(policy.isEnabled)
-    XCTAssertTrue(policy.honorsServerTtlOverride)
   }
 
   /// The default cap, pinned against a literal.
@@ -253,22 +249,17 @@ final class ModelTests: XCTestCase {
     XCTAssertNil(CachePolicy(maxEntries: nil).maxEntries, "unbounded stays available on request")
   }
 
-  func testServerTtlOverridesThePerTierDefault() {
-    let policy = CachePolicy.default
-    XCTAssertEqual(policy.effectiveTtl(for: .high, serverTtlSeconds: 120), 120)
-    XCTAssertEqual(policy.effectiveTtl(for: .high, serverTtlSeconds: nil), 30 * 24 * 60 * 60)
-    // A negative override makes the entry stale immediately, never eternally fresh.
-    XCTAssertEqual(policy.effectiveTtl(for: .high, serverTtlSeconds: -5), 0)
-
-    var ignoring = CachePolicy.default
-    ignoring.honorsServerTtlOverride = false
-    XCTAssertEqual(ignoring.effectiveTtl(for: .caution, serverTtlSeconds: 120), 24 * 60 * 60)
+  /// A host can zero a tier, and zero has a second meaning: the cache stores nothing at all.
+  func testATierTtlCanBeZeroSoAHostCanRefuseToCacheThatTier() {
+    var policy = CachePolicy.default
+    policy.noneTtl = 0
+    XCTAssertEqual(policy.ttl(for: RiskTier.none), 0)
+    XCTAssertEqual(policy.ttl(for: .high), 30 * 24 * 60 * 60)
   }
 
-  func testFreshnessUsesFetchedAtAndTheEffectiveTtl() throws {
+  func testFreshnessUsesFetchedAtAndTheTierTtl() throws {
     let fetchedAt = try instant("2026-07-09T10:00:00Z")
-    let result = CheckResult(
-      found: true, riskTier: .caution, cacheTtlSeconds: nil, origin: .cache, fetchedAt: fetchedAt)
+    let result = CheckResult(found: true, riskTier: .caution, origin: .cache, fetchedAt: fetchedAt)
 
     XCTAssertTrue(CachePolicy.default.isFresh(result, now: fetchedAt.addingTimeInterval(23 * 3600)))
     XCTAssertFalse(CachePolicy.default.isFresh(result, now: fetchedAt.addingTimeInterval(25 * 3600)))
@@ -276,11 +267,9 @@ final class ModelTests: XCTestCase {
       CachePolicy.disabled.isFresh(result, now: fetchedAt),
       "a disabled cache must never report an entry as fresh")
 
-    let shortLived = result.withOrigin(.cache)
-    let overridden = CheckResult(
-      found: shortLived.found, riskTier: .caution, cacheTtlSeconds: 60, origin: .cache,
-      fetchedAt: fetchedAt)
-    XCTAssertFalse(CachePolicy.default.isFresh(overridden, now: fetchedAt.addingTimeInterval(120)))
+    var shortLived = CachePolicy.default
+    shortLived.cautionTtl = 60
+    XCTAssertFalse(shortLived.isFresh(result, now: fetchedAt.addingTimeInterval(120)))
   }
 
   // MARK: - Wire vocabulary

@@ -27,9 +27,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   public let comments: [Comment]?
   /// Absent on a cache hit: a cache hit is free, so there is nothing to bill.
   public let billing: Billing?
-  /// Server-driven TTL override in seconds. When present it **replaces** the per-tier default
-  /// — this is the fleet-wide invalidation lever, so honour it.
-  public let cacheTtlSeconds: Int64?
   /// Legal text that must be surfaced in any UI built on the SDK.
   public let disclaimer: String?
   public let origin: Origin
@@ -52,7 +49,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     topChronologies: [Chronology]? = nil,
     comments: [Comment]? = nil,
     billing: Billing? = nil,
-    cacheTtlSeconds: Int64? = nil,
     disclaimer: String? = nil,
     origin: Origin = .server,
     fetchedAt: Date
@@ -71,7 +67,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     self.topChronologies = topChronologies
     self.comments = comments
     self.billing = billing
-    self.cacheTtlSeconds = cacheTtlSeconds
     self.disclaimer = disclaimer
     self.origin = origin
     self.fetchedAt = fetchedAt
@@ -111,7 +106,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
       topChronologies: nil,
       comments: nil,
       billing: nil,
-      cacheTtlSeconds: cacheTtlSeconds,
       disclaimer: disclaimer,
       origin: .cache,
       fetchedAt: fetchedAt
@@ -147,7 +141,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
       topChronologies: nil,
       comments: nil,
       billing: billing,
-      cacheTtlSeconds: cacheTtlSeconds,
       disclaimer: disclaimer,
       origin: origin,
       fetchedAt: fetchedAt
@@ -172,7 +165,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
       topChronologies: topChronologies,
       comments: comments,
       billing: billing,
-      cacheTtlSeconds: cacheTtlSeconds,
       disclaimer: disclaimer,
       origin: origin,
       fetchedAt: fetchedAt ?? self.fetchedAt
@@ -196,7 +188,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     case topChronologies
     case comments
     case billing
-    case cacheTtlSeconds
     case disclaimer
     case origin
     case fetchedAt
@@ -222,7 +213,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     self.topChronologies = container.traciveDecodeIfPresent([Chronology].self, forKey: .topChronologies)
     self.comments = container.traciveDecodeIfPresent([Comment].self, forKey: .comments)
     self.billing = container.traciveDecodeIfPresent(Billing.self, forKey: .billing)
-    self.cacheTtlSeconds = container.traciveInt64IfPresent(.cacheTtlSeconds)
     self.disclaimer = container.traciveStringIfPresent(.disclaimer)
 
     // `origin` and `fetchedAt` are SDK-side provenance. A server response carries neither, so they
@@ -248,7 +238,6 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     try container.encodeIfPresent(topChronologies, forKey: .topChronologies)
     try container.encodeIfPresent(comments, forKey: .comments)
     try container.encodeIfPresent(billing, forKey: .billing)
-    try container.encodeIfPresent(cacheTtlSeconds, forKey: .cacheTtlSeconds)
     try container.encodeIfPresent(disclaimer, forKey: .disclaimer)
     try container.encode(origin, forKey: .origin)
     try container.traciveEncodeISO8601(fetchedAt, forKey: .fetchedAt)

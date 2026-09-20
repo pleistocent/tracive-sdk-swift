@@ -41,7 +41,6 @@ final class TransactionCheckTests: XCTestCase {
   private func makeResult(
     tier: RiskTier = .high,
     fetchedAt: Date = TransactionCheckTests.t0,
-    cacheTtlSeconds: Int64? = nil,
     origin: Origin = .server
   ) -> CheckResult {
     CheckResult(
@@ -65,7 +64,6 @@ final class TransactionCheckTests: XCTestCase {
                 fromCredibleReport: true)
       ],
       billing: Billing(creditSource: .user, unitsCharged: 1, partnerBalanceRemaining: 47),
-      cacheTtlSeconds: cacheTtlSeconds,
       disclaimer: "Tracive reports are user-submitted.",
       origin: origin,
       fetchedAt: fetchedAt
@@ -110,19 +108,20 @@ final class TransactionCheckTests: XCTestCase {
     XCTAssertEqual(try cache.count(), 0, "an expired record is deleted as it is found")
   }
 
-  func testServerTtlOverrideDoesNotRetractARecord() throws {
-    // `cacheTtlSeconds` is the backend's lever for un-trusting a verdict. Applied to a record it
-    // would erase the evidence that a warning was shown — precisely what a partner needs when the
-    // transfer is disputed.
+  func testATierTtlOfZeroDoesNotStopARecordBeingFiled() throws {
+    // A host that declines to cache HIGH at all must still be able to show what the user was
+    // warned about — precisely what a partner needs when the transfer is disputed.
     let clock = TestClock(Self.t0)
-    let cache = try SQLiteCheckCache.inMemory(now: clock.provider)
+    var policy = CachePolicy.default
+    policy.highTtl = 0
+    let cache = try SQLiteCheckCache.inMemory(policy: policy, now: clock.provider)
     let query = try makeQuery()
-    let retracted = makeResult(tier: .high, cacheTtlSeconds: 0)
+    let shown = makeResult(tier: .high)
 
-    try cache.write(retracted, for: query)
-    try cache.writeTransactionCheck(retracted, for: firstTransfer)
+    try cache.write(shown, for: query)
+    try cache.writeTransactionCheck(shown, for: firstTransfer)
 
-    XCTAssertNil(try cache.read(query), "a zero server TTL retracts the cached answer")
+    XCTAssertNil(try cache.read(query), "a zero tier TTL stores no cache entry")
     let record = try XCTUnwrap(try cache.readTransactionCheck(for: firstTransfer))
     XCTAssertEqual(record.riskTier, .high)
   }

@@ -13,8 +13,8 @@ import Foundation
 ///    `topChronologies`, `comments`, `billing` and `checkId`. The key is the query alone, so a
 ///    cached `full` response would be served to a later `minimal` request and vice versa. If a
 ///    future version does cache full detail, the key must become `(query, detail, locale)`.
-/// 3. **Freshness is decided on read**, from the current `policy` and the stored `fetchedAt` /
-///    `cacheTtlSeconds`. An expired entry reads as `nil`.
+/// 3. **Freshness is decided on read**, from the current `policy` and the stored `fetchedAt`. An
+///    expired entry reads as `nil`.
 /// 4. **A read never returns a stale-but-plausible answer.** Wrongness here is silent and lands in
 ///    a fraud warning, so the failure mode must be "no answer", never "an old answer".
 ///
@@ -63,8 +63,8 @@ public protocol CheckCache: AnyObject, Sendable {
   ///   two transactions — a user who transfers to the same account twice — is two calls with two
   ///   ids and one billed check.
   /// - **It outlives the cache entry.** The lifetime is `policy.transactionCheckRetention` rather
-  ///   than a tier TTL, and `cacheTtlSeconds` is not applied: that field retracts a verdict, and a
-  ///   record of the past cannot be retracted.
+  ///   than a tier TTL, because a clean answer stops being *trustworthy* after an hour but never
+  ///   stops being *what was shown*.
   /// - **`origin` and `fetchedAt` are stored as given**, so a record marked `.cache` is the honest
   ///   statement that this transfer spent no credit.
   ///
