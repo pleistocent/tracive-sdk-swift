@@ -52,11 +52,11 @@ source compatibility until the API freezes at 1.0.
 ### Breaking
 - **The server TTL override is gone: `CachePolicy.honorsServerTtlOverride`, both `effectiveTtl`
   overloads and `CheckResult.cacheTtlSeconds` are all removed.** The backend stopped sending
-  `cacheTtlSeconds` (`pleistocent-firebase@88fd6f9`) because its per-tier ladder was a copy of the
-  one every SDK already has locally; cache lifetime is the SDK's own business. So the flag gated a
-  branch that could never be taken. `policy.ttl(for: tier)` is now the whole of the lifetime policy
-  — use it where you used `effectiveTtl`. A `cacheTtlSeconds` still arriving from a proxy is a key
-  the model does not have, and `Codable` skips it rather than failing the decode.
+  `cacheTtlSeconds` because its per-tier ladder was a copy of the one every SDK already has
+  locally; cache lifetime is the SDK's own business. So the flag gated a branch that could never be
+  taken. `policy.ttl(for: tier)` is now the whole of the lifetime policy — use it where you used
+  `effectiveTtl`. A `cacheTtlSeconds` still arriving from a proxy is a key the model does not have,
+  and `Codable` skips it rather than failing the decode.
 
   Both types have memberwise initialisers, so a caller that passed either argument by name has to
   drop it.

@@ -305,10 +305,10 @@ final class ClientTests: XCTestCase {
 
   /// A `cacheTtlSeconds` still on the wire is ignored, and does not break the decode.
   ///
-  /// The backend stopped sending it (pleistocent-firebase@88fd6f9) and the SDK no longer models it,
-  /// but a proxy or an old deployment may still. Two things have to hold: the response decodes, and
-  /// the tier ladder decides the lifetime — so a HIGH answer with a ten-second directive on it is
-  /// still served from the cache thirty seconds later, with no second call.
+  /// The backend stopped sending it and the SDK no longer models it, but a proxy or an old
+  /// deployment may still. Two things have to hold: the response decodes, and the tier ladder
+  /// decides the lifetime — so a HIGH answer with a ten-second directive on it is still served from
+  /// the cache thirty seconds later, with no second call.
   func testACacheTtlSecondsStillOnTheWireIsIgnored() async throws {
     let clock = RecordingClock()
     let cache = try SQLiteCheckCache.inMemory(keyStore: EphemeralCacheKeyStore(), now: clock.provider)
