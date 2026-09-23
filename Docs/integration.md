@@ -289,6 +289,10 @@ func handle(_ error: TraciveError) {
   case .insufficientCredits(let which, _):
     showTopUp(for: which)
 
+  case .rateLimited(let retryAfter, _) where error.isDailyQuotaExceeded:
+    // The organisation's daily check quota is spent; `retryAfter` points at 00:00 UTC.
+    showTryAgainTomorrow(after: retryAfter)
+
   case .rateLimited(let retryAfter, _):
     scheduleRetry(after: retryAfter ?? 30)
 
@@ -307,8 +311,13 @@ func handle(_ error: TraciveError) {
     // up as one unexplained refresh before the call you actually made.
     showReconnect()
 
-  case .missingScope, .detailNotPermitted:
+  case .missingScope, .detailNotPermitted, .userCreditNotPermitted:
     log("This client is not entitled to that call: \(error.serverCode ?? "-")")
+
+  case .translationNotPermitted:
+    // Your contract withholds translation, or the user has no premium subscription. Checking again
+    // without a `locale` returns the English result.
+    retryInEnglish()
 
   case .cacheMiss:
     // Only possible with source: .cache.

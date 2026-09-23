@@ -36,8 +36,11 @@ final class ErrorMappingTests: XCTestCase {
       (403, "detail_not_permitted", .detailNotPermitted),
       (403, "credential_mismatch", .credentialMismatch),
       (403, "partner_suspended", .partnerSuspended),
+      (403, "user_credit_not_permitted", .userCreditNotPermitted),
+      (403, "translation_not_permitted", .translationNotPermitted),
       (409, "idempotency_conflict", .idempotencyConflict),
       (429, "rate_limited", .rateLimited),
+      (429, "daily_quota_exceeded", .rateLimited),
     ]
 
     for row in table {
@@ -104,6 +107,35 @@ final class ErrorMappingTests: XCTestCase {
 
     XCTAssertEqual(error.kind, .server)
     XCTAssertEqual(error.serverCode, "grant_revoked")
+  }
+
+  func testDailyQuotaIsARateLimitThatSaysSoAndKeepsItsRetryAfter() {
+    // It stays `.rateLimited` so a partner's existing handler keeps working; the property is what
+    // tells a day-long wait apart from a burst limit measured in seconds.
+    let error = TraciveResponseMapper.error(
+      from: .error(status: 429, code: "daily_quota_exceeded", headers: ["Retry-After": "43200"]),
+      now: now
+    )
+
+    guard case .rateLimited(let retryAfter, _) = error else {
+      return XCTFail("Expected rateLimited, got \(error).")
+    }
+    XCTAssertEqual(retryAfter, 43_200)
+    XCTAssertTrue(error.isDailyQuotaExceeded)
+  }
+
+  func testOnlyTheDailyQuotaCodeClaimsIsDailyQuotaExceeded() {
+    XCTAssertFalse(TraciveError.from(status: 429, code: "rate_limited").isDailyQuotaExceeded)
+    XCTAssertFalse(TraciveError.from(status: 429, code: "throttled").isDailyQuotaExceeded)
+    XCTAssertFalse(TraciveError.from(status: 429, code: nil).isDailyQuotaExceeded)
+    // The code on another status is not a rate limit, so it is not the daily quota either.
+    XCTAssertFalse(
+      TraciveError.from(status: 403, code: "daily_quota_exceeded").isDailyQuotaExceeded)
+  }
+
+  func testNotPermittedRefusalsAreNotTransient() {
+    XCTAssertFalse(TraciveError.from(status: 403, code: "user_credit_not_permitted").isTransient)
+    XCTAssertFalse(TraciveError.from(status: 403, code: "translation_not_permitted").isTransient)
   }
 
   func testUnlabelledRateLimitIsStillRateLimited() {

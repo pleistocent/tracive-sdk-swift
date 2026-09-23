@@ -8,6 +8,12 @@ source compatibility until the API freezes at 1.0.
 ## [Unreleased]
 
 ### Added
+- **Three newer server error codes now have a type.** `user_credit_not_permitted` and
+  `translation_not_permitted` (both 403 on a check) map to the new cases
+  `.userCreditNotPermitted` and `.translationNotPermitted` instead of `.unknown`, with matching
+  `TraciveErrorKind` values. `daily_quota_exceeded` stays `.rateLimited`, so an existing handler
+  keeps working, and the new `error.isDailyQuotaExceeded` tells it apart from a short burst limit.
+  A `switch` over `TraciveError` or `TraciveErrorKind` with no `default` gains two cases.
 - **A check can now be recorded against your own transaction, so a transaction-detail screen can show
   it again later.** `client.cache` gains `writeTransactionCheck(_:for:)`,
   `readTransactionCheck(for:)` and `removeTransactionCheck(for:)`.

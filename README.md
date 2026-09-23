@@ -422,11 +422,13 @@ Everything throws `TraciveError`. The interesting cases:
 | Case | Meaning | What to do |
 |---|---|---|
 | `.insufficientCredits(which:info:)` | 402 | prompt for a top-up |
-| `.rateLimited(retryAfter:info:)` | 429 | back off by `retryAfter`. Never retried automatically, on any request |
+| `.rateLimited(retryAfter:info:)` | 429 | back off by `retryAfter`. Never retried automatically, on any request. When `error.isDailyQuotaExceeded` is `true` the organisation's daily check quota is spent and `retryAfter` points at 00:00 UTC: tell the user to try later |
 | `.grantRevoked` | the whole grant is gone | tokens are already cleared; restart consent. **Do not retry** |
 | `.expiredToken` | refresh failed | restart consent |
 | `.invalidToken` | no usable grant is stored. `info.code` says which: `no_grant` — nobody has authorised yet; `unusable_grant` — the stored record lost its access token and had no refresh token left to renew from | call `authorize()`. Nothing was sent to the server, so no call was billed. Worth logging `unusable_grant` separately: it points at local storage, not at the user |
 | `.missingScope` / `.detailNotPermitted` | 403 | your client is not entitled to that call |
+| `.userCreditNotPermitted` | 403 on a check: your contract does not let you charge the user's subscription credits | contact Tracive; retrying will not help |
+| `.translationNotPermitted` | 403 on a `.full` check with a non-English `locale`: your contract withholds translation, or the user has no premium subscription | check again without `locale` for the English result |
 | `.cacheMiss` | `.cache` source with nothing fresh stored — or with `detail: .full`, which no row can answer | go to the server |
 | `.network(cause:)` | no HTTP response at all | offline; see the idempotency note above before retrying |
 | `.notImplemented` | Proxy mode, today | use OAuth mode |

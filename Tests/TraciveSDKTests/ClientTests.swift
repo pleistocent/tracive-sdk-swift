@@ -822,6 +822,7 @@ final class ClientTests: XCTestCase {
       return XCTFail("Expected rateLimited, got \(String(describing: error))")
     }
     XCTAssertEqual(retryAfter, 43_200)
+    XCTAssertEqual(error?.isDailyQuotaExceeded, true)
     XCTAssertEqual(transport.callCount, 1)
     XCTAssertEqual(clock.sleeps, [])
   }

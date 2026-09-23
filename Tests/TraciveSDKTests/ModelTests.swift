@@ -466,6 +466,8 @@ final class ModelTests: XCTestCase {
       (403, "detail_not_permitted", .detailNotPermitted),
       (403, "credential_mismatch", .credentialMismatch),
       (403, "partner_suspended", .partnerSuspended),
+      (403, "user_credit_not_permitted", .userCreditNotPermitted),
+      (403, "translation_not_permitted", .translationNotPermitted),
       (409, "idempotency_conflict", .idempotencyConflict),
       (429, "rate_limited", .rateLimited),
     ]
@@ -569,6 +571,8 @@ final class ModelTests: XCTestCase {
       .detailNotPermitted(.empty),
       .credentialMismatch(.empty),
       .partnerSuspended(.empty),
+      .userCreditNotPermitted(.empty),
+      .translationNotPermitted(.empty),
       .idempotencyConflict(.empty),
       .rateLimited(retryAfter: nil, info: .empty),
       .network(cause: URLError(.notConnectedToInternet)),

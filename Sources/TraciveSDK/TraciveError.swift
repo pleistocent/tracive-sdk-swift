@@ -45,6 +45,13 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
   case detailNotPermitted(TraciveErrorInfo)
   case credentialMismatch(TraciveErrorInfo)
   case partnerSuspended(TraciveErrorInfo)
+  /// `user_credit_not_permitted`: your contract does not let this partner charge the user's
+  /// subscription credits. Refused before any charge. Retrying will not help.
+  case userCreditNotPermitted(TraciveErrorInfo)
+  /// `translation_not_permitted`: a `.full` check asked for a non-English `locale`, and either your
+  /// contract withholds translation or the user has no premium subscription. Checking again
+  /// without a `locale` returns the English result.
+  case translationNotPermitted(TraciveErrorInfo)
 
   // 409
   case idempotencyConflict(TraciveErrorInfo)
@@ -52,6 +59,9 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
   // 429
   /// `retryAfter` comes from the `Retry-After` response header. It is a `TimeInterval` rather than
   /// `Duration` because `Duration` needs iOS 16 and this SDK supports iOS 15.
+  ///
+  /// Also raised for `daily_quota_exceeded`, where `retryAfter` runs to 00:00 UTC; see
+  /// `isDailyQuotaExceeded`. Never retried automatically.
   case rateLimited(retryAfter: TimeInterval?, info: TraciveErrorInfo)
 
   /// Transport failure: no HTTP response at all (offline, DNS, TLS, timeout).
@@ -99,6 +109,8 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
     case .detailNotPermitted: return .detailNotPermitted
     case .credentialMismatch: return .credentialMismatch
     case .partnerSuspended: return .partnerSuspended
+    case .userCreditNotPermitted: return .userCreditNotPermitted
+    case .translationNotPermitted: return .translationNotPermitted
     case .idempotencyConflict: return .idempotencyConflict
     case .rateLimited: return .rateLimited
     case .network: return .network
@@ -117,6 +129,7 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
       .unsupportedCreditSource(let info), .invalidToken(let info), .expiredToken(let info),
       .grantRevoked(let info), .invalidApiKey(let info), .missingScope(let info),
       .detailNotPermitted(let info), .credentialMismatch(let info), .partnerSuspended(let info),
+      .userCreditNotPermitted(let info), .translationNotPermitted(let info),
       .idempotencyConflict(let info):
       return info
     case .insufficientCredits(_, let info), .rateLimited(_, let info), .server(_, let info),
@@ -129,6 +142,14 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
 
   /// The raw `error.code` the server sent, if any.
   public var serverCode: String? { info?.code }
+
+  /// A `.rateLimited` whose cause is the organisation's daily check quota (`daily_quota_exceeded`)
+  /// rather than a short burst limit. Waiting a few seconds will not help; `retryAfter` points at
+  /// the reset at 00:00 UTC.
+  public var isDailyQuotaExceeded: Bool {
+    guard case .rateLimited(_, let info) = self else { return false }
+    return info.code == "daily_quota_exceeded"
+  }
 
   /// Whether the failure *could* succeed on a later attempt.
   ///
@@ -182,10 +203,13 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
     case (403, "detail_not_permitted"): return .detailNotPermitted(info)
     case (403, "credential_mismatch"): return .credentialMismatch(info)
     case (403, "partner_suspended"): return .partnerSuspended(info)
+    case (403, "user_credit_not_permitted"): return .userCreditNotPermitted(info)
+    case (403, "translation_not_permitted"): return .translationNotPermitted(info)
 
     case (409, "idempotency_conflict"): return .idempotencyConflict(info)
 
-    case (429, "rate_limited"): return .rateLimited(retryAfter: retryAfter, info: info)
+    case (429, "rate_limited"), (429, "daily_quota_exceeded"):
+      return .rateLimited(retryAfter: retryAfter, info: info)
 
     default:
       // Unrecognised (status, code) pair. Never crash, never drop the code.
@@ -267,6 +291,8 @@ public enum TraciveErrorKind: String, CaseIterable, Hashable, Sendable {
   case detailNotPermitted
   case credentialMismatch
   case partnerSuspended
+  case userCreditNotPermitted
+  case translationNotPermitted
   case idempotencyConflict
   case rateLimited
   case network
