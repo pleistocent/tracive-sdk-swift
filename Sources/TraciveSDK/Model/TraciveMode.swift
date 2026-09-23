@@ -74,6 +74,27 @@ public struct OAuthConfiguration: Equatable, Hashable, Sendable {
   public let partnerUserId: String
   public let clientType: ClientType
 
+  static let partnerUserIdMaxLength = 200
+
+  /// Why the server would refuse `value` as a `partner_user_id` (backend `partnerUserIdProblem`),
+  /// or nil when it accepts it. KEEP IN SYNC with the server and the other three SDKs. Length is
+  /// counted in UTF-16 units, as the server's JavaScript `length` does.
+  static func partnerUserIdProblem(_ value: String) -> String? {
+    let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if v.isEmpty { return "must not be blank" }
+    if v.utf16.count > partnerUserIdMaxLength {
+      return "must be at most \(partnerUserIdMaxLength) characters"
+    }
+    if v.contains("@") { return "looks like an email address" }
+    let compact = v.replacingOccurrences(
+      of: #"[\s\-().]"#, with: "", options: .regularExpression)
+    for pattern in [#"^\+\d{7,15}$"#, #"^(08|628)\d{8,11}$"#]
+    where compact.range(of: pattern, options: .regularExpression) != nil {
+      return "looks like a phone number"
+    }
+    return nil
+  }
+
   public init(
     clientId: String,
     redirectUri: URL,
@@ -81,10 +102,11 @@ public struct OAuthConfiguration: Equatable, Hashable, Sendable {
     partnerUserId: String,
     clientType: ClientType = .public
   ) {
-    precondition(
-      !partnerUserId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-      "OAuthConfiguration needs a partnerUserId. The authorization request must carry one: the Tracive app refuses a consent without it, client-side and with no redirect, so the failure would reach you as silence rather than as an error."
-    )
+    if let problem = Self.partnerUserIdProblem(partnerUserId) {
+      preconditionFailure(
+        "OAuthConfiguration: partnerUserId \(problem). Send an opaque id you store — a UUID or your own customer key — because it is stored as sent and echoed back in grant.revoked. The Tracive app refuses anything else with no redirect, so the failure would reach you as silence rather than as an error."
+      )
+    }
     self.clientId = clientId
     self.redirectUri = redirectUri
     self.scopes = scopes

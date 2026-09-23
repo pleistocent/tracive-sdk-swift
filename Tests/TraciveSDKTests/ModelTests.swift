@@ -373,6 +373,20 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(custom, .custom(baseUrl: try XCTUnwrap(URL(string: "http://127.0.0.1:8080/v1"))))
   }
 
+  func testPartnerUserIdRuleMatchesTheServer() {
+    for refused in [
+      "", "   ", String(repeating: "x", count: 201), "budi@example.com", "budi@localhost",
+      "+6281234567890", "0812-3456-7890", "628123456789", "(0812) 3456 7890",
+    ] {
+      XCTAssertNotNil(OAuthConfiguration.partnerUserIdProblem(refused), refused)
+    }
+    for accepted in [
+      String(repeating: "x", count: 200), "1234567890", "cif-00012345", "pengguna-ñ-日本",
+    ] {
+      XCTAssertNil(OAuthConfiguration.partnerUserIdProblem(accepted), accepted)
+    }
+  }
+
   func testOAuthModeDefaultsToAPublicClient() throws {
     let redirect = try XCTUnwrap(URL(string: "https://partner.example/oauth/callback"))
     let mode = TraciveMode.oauth(
