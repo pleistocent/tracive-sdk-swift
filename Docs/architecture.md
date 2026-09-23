@@ -220,7 +220,7 @@ flowchart TD
   S401{"status is 401"}
   GR["clearStoredTokens, then throw .grantRevoked"]
   RF["oauth.refreshTokens(staleAccessToken:)"]
-  ST{"status is 5xx or 429"}
+  ST{"status is 5xx (a 429 is never retried)"}
   RET{"isRetryable and attempts left"}
   W2["sleep for Retry-After or the backoff, then resend"]
   OUT["return the response to be decoded or mapped"]
@@ -363,8 +363,10 @@ one refresh is attempted per request; a second 401 falls through and surfaces.
 The retry loop, by contrast, is governed by `RetryPolicy` and by `isRetryable`, which is `true` for
 `GET /v1/credits` and `GET /v1/profile` — no side effects, so nothing to double-charge — and for a
 check **only when you supplied an `Idempotency-Key`**. A check without your key fails fast on the
-first 5xx or timeout rather than risking a second charge. A `Retry-After` header, when the server
-sends one, wins over the computed backoff.
+first 5xx or timeout rather than risking a second charge. A `Retry-After` header on a 5xx wins over
+the computed backoff. A 429 is never retried, on any request: a spent daily quota sends a
+`Retry-After` that runs to the next UTC midnight, so it surfaces at once as
+`.rateLimited(retryAfter:)` and waiting is your decision.
 
 ---
 

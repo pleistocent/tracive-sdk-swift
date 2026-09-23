@@ -74,6 +74,12 @@ source compatibility until the API freezes at 1.0.
   `client.cache`.
 
 ### Fixed
+- **A 429 is no longer retried.** `credits()`, `profile()` and a check carrying your
+  `Idempotency-Key` used to sleep for the `Retry-After` and send again, up to three times. A spent
+  daily quota answers with a `Retry-After` that runs to the next UTC midnight, so one call could
+  hold its caller for most of a day and still end in `.rateLimited`. A 429 now surfaces on the first
+  response as `.rateLimited(retryAfter:)`, as it already did in the Kotlin and Flutter SDKs. 5xx and
+  network retries are unchanged.
 - **The quick start in `README.md` did not compile.** It omitted `partnerUserId`, which the OAuth
   configuration requires and gives no default, so the first thing anyone starting from the README
   met was a type error. The field is now in the snippet, and every value a partner has to supply

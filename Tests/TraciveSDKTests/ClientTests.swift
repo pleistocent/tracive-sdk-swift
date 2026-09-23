@@ -786,11 +786,11 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(transport.callCount, 2)
   }
 
-  func testRateLimitedRetryHonoursRetryAfter() async throws {
+  func testServerErrorRetryHonoursRetryAfter() async throws {
     let clock = RecordingClock()
     let transport = FakeHTTPTransport { _, index in
       index == 0
-        ? .error(status: 429, code: "rate_limited", headers: ["Retry-After": "4"])
+        ? .error(status: 503, code: nil, headers: ["Retry-After": "4"])
         : .ok(json: Fixtures.minimalCheckJSON)
     }
     let client = makeClient(
@@ -803,6 +803,60 @@ final class ClientTests: XCTestCase {
 
     // The server's own window wins over the exponential curve.
     XCTAssertEqual(clock.sleeps, [4.0])
+  }
+
+  // A spent daily quota answers 429 with a Retry-After that runs to the next UTC midnight. Sleeping
+  // on it inside one call held the caller for up to a day and then sent the request again into the
+  // same refusal, so a 429 is surfaced on the first response even where retrying is otherwise safe.
+
+  func testDailyQuota429OnCreditsIsSurfacedWithoutRetryOrSleep() async throws {
+    let clock = RecordingClock()
+    let transport = FakeHTTPTransport { _, _ in
+      .error(status: 429, code: "daily_quota_exceeded", headers: ["Retry-After": "43200"])
+    }
+    let client = makeClient(transport: transport, clock: clock, retryPolicy: .default)
+
+    let error = await expectTraciveError { _ = try await client.credits() }
+
+    guard case .rateLimited(let retryAfter, _) = error else {
+      return XCTFail("Expected rateLimited, got \(String(describing: error))")
+    }
+    XCTAssertEqual(retryAfter, 43_200)
+    XCTAssertEqual(transport.callCount, 1)
+    XCTAssertEqual(clock.sleeps, [])
+  }
+
+  func testDailyQuota429OnAKeyedCheckIsSurfacedWithoutRetryOrSleep() async throws {
+    let clock = RecordingClock()
+    let transport = FakeHTTPTransport { _, _ in
+      .error(status: 429, code: "daily_quota_exceeded", headers: ["Retry-After": "43200"])
+    }
+    let client = makeClient(transport: transport, clock: clock, retryPolicy: .default)
+
+    let error = await expectTraciveError {
+      try await client.checkScammer(TestQueries.phone, idempotencyKey: "txn-429")
+    }
+
+    guard case .rateLimited(let retryAfter, _) = error else {
+      return XCTFail("Expected rateLimited, got \(String(describing: error))")
+    }
+    XCTAssertEqual(retryAfter, 43_200)
+    XCTAssertEqual(transport.callCount, 1)
+    XCTAssertEqual(clock.sleeps, [])
+  }
+
+  func testOrdinaryRateLimitOnProfileIsNotRetriedEither() async throws {
+    let clock = RecordingClock()
+    let transport = FakeHTTPTransport { _, _ in
+      .error(status: 429, code: "rate_limited", headers: ["Retry-After": "1"])
+    }
+    let client = makeClient(transport: transport, clock: clock, retryPolicy: .default)
+
+    let error = await expectTraciveError { _ = try await client.profile() }
+
+    XCTAssertEqual(error?.kind, .rateLimited)
+    XCTAssertEqual(transport.callCount, 1)
+    XCTAssertEqual(clock.sleeps, [])
   }
 
   func testRateLimitedWithoutAKeyIsSurfacedRatherThanRetried() async throws {

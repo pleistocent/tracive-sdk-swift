@@ -124,7 +124,7 @@ Pass the upstream envelope through as-is:
 with the upstream HTTP status. The SDK maps `error.code` to a typed `TraciveError`, and an
 unrecognised code degrades to `.server` or `.unknown` still carrying the raw code — so a code you
 invent for your own gateway reaches the app intact rather than crashing it. Preserve `Retry-After` on
-a 429; it is what `TraciveError.rateLimited(retryAfter:)` reads.
+a 429; it is what `TraciveError.rateLimited(retryAfter:)` reads. The SDK never retries a 429 itself.
 
 ### What your gateway must not do
 

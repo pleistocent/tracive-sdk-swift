@@ -673,8 +673,8 @@ public actor TraciveClient {
   /// Sends an authenticated request, handling the 401 refresh dance and the retry policy.
   ///
   /// - Parameter isRetryable: whether repeating this exact request is safe. `true` for GETs and for
-  ///   a check carrying an `Idempotency-Key`; `false` otherwise, in which case a 5xx, a 429 or a
-  ///   timeout is surfaced immediately rather than risking a second charge.
+  ///   a check carrying an `Idempotency-Key`; `false` otherwise, in which case a 5xx or a timeout is
+  ///   surfaced immediately rather than risking a second charge. A 429 is never retried either way.
   private func sendAuthorized(
     _ request: HTTPRequest,
     isRetryable: Bool
@@ -745,8 +745,11 @@ public actor TraciveClient {
         }
       }
 
-      let isTransientStatus = response.status >= 500 || response.status == 429
-      if isTransientStatus, isRetryable, retryPolicy.allowsAnotherAttempt(after: completedAttempts)
+      // A 429 is never retried, keyed or not: its Retry-After can run to the next UTC midnight, and
+      // sleeping on it inside one call would hold the caller for hours. It is returned as-is and
+      // surfaces as `.rateLimited(retryAfter:)`, so the caller decides whether to wait.
+      if response.status >= 500, isRetryable,
+        retryPolicy.allowsAnotherAttempt(after: completedAttempts)
       {
         let retryAfter = TraciveError.retryAfterSeconds(
           from: response.header("Retry-After"),

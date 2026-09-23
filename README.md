@@ -422,7 +422,7 @@ Everything throws `TraciveError`. The interesting cases:
 | Case | Meaning | What to do |
 |---|---|---|
 | `.insufficientCredits(which:info:)` | 402 | prompt for a top-up |
-| `.rateLimited(retryAfter:info:)` | 429 | back off by `retryAfter` |
+| `.rateLimited(retryAfter:info:)` | 429 | back off by `retryAfter`. Never retried automatically, on any request |
 | `.grantRevoked` | the whole grant is gone | tokens are already cleared; restart consent. **Do not retry** |
 | `.expiredToken` | refresh failed | restart consent |
 | `.invalidToken` | no usable grant is stored. `info.code` says which: `no_grant` — nobody has authorised yet; `unusable_grant` — the stored record lost its access token and had no refresh token left to renew from | call `authorize()`. Nothing was sent to the server, so no call was billed. Worth logging `unusable_grant` separately: it points at local storage, not at the user |

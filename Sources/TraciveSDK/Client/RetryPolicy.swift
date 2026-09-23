@@ -19,8 +19,10 @@ import Foundation
 /// to work around; it is the SDK refusing to spend the caller's money on a guess. Callers who want
 /// retries pass a key, and the SDK reuses that same key on every attempt.
 ///
-/// `retryAfter` on a 429 is honoured over the computed backoff — the server knows its own window
-/// better than an exponential curve does.
+/// A 429 is never retried, whatever the request: its `Retry-After` can point at the next UTC
+/// midnight, so it surfaces at once as `.rateLimited(retryAfter:)` and the caller decides whether
+/// to wait. A `Retry-After` on a 5xx is honoured over the computed backoff — the server knows its
+/// own window better than an exponential curve does.
 ///
 /// ## The default numbers, and why each one is what it is
 ///
@@ -66,7 +68,7 @@ import Foundation
 /// - **`maxBackoff = 8 s`** never binds at the default `maxAttempts`, where the schedule stops at
 ///   1.0 s. It exists for the caller who raises `maxAttempts`, and it is the point past which a
 ///   mobile user has already decided the app is broken, so waiting longer buys a result nobody is
-///   still waiting for. A `Retry-After` from the server overrides it even when it is longer — see
+///   still waiting for. A `Retry-After` on a 5xx overrides it even when it is longer — see
 ///   `delay(forRetry:retryAfter:)`.
 public struct RetryPolicy: Equatable, Hashable, Sendable {
 
