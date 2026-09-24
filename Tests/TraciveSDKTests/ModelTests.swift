@@ -381,7 +381,7 @@ final class ModelTests: XCTestCase {
       XCTAssertNotNil(OAuthConfiguration.partnerUserIdProblem(refused), refused)
     }
     for accepted in [
-      String(repeating: "x", count: 200), "1234567890", "cif-00012345", "pengguna-ñ-日本",
+      String(repeating: "x", count: 200), "1234567890", "cif-00012345", "user-ñ-日本",
     ] {
       XCTAssertNil(OAuthConfiguration.partnerUserIdProblem(accepted), accepted)
     }
