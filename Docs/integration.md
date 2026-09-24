@@ -290,7 +290,7 @@ func handle(_ error: TraciveError) {
     showTopUp(for: which)
 
   case .rateLimited(let retryAfter, _) where error.isDailyQuotaExceeded:
-    // The organisation's daily check quota is spent; `retryAfter` points at 00:00 UTC.
+    // A daily allowance is spent; `retryAfter` points at 00:00 UTC.
     showTryAgainTomorrow(after: retryAfter)
 
   case .rateLimited(let retryAfter, _):

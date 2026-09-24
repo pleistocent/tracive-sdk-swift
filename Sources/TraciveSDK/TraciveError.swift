@@ -143,8 +143,8 @@ public enum TraciveError: Error, Sendable, CustomStringConvertible, LocalizedErr
   /// The raw `error.code` the server sent, if any.
   public var serverCode: String? { info?.code }
 
-  /// A `.rateLimited` whose cause is the organisation's daily check quota (`daily_quota_exceeded`)
-  /// rather than a short burst limit. Waiting a few seconds will not help; `retryAfter` points at
+  /// A `.rateLimited` whose cause is a spent daily allowance — the connection's daily quota, its
+  /// account reads, or the sandbox org cap (`daily_quota_exceeded`) — rather than a per-second limit. Waiting a few seconds will not help; `retryAfter` points at
   /// the reset at 00:00 UTC.
   public var isDailyQuotaExceeded: Bool {
     guard case .rateLimited(_, let info) = self else { return false }
