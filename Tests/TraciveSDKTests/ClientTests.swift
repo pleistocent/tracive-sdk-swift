@@ -2268,11 +2268,12 @@ final class RetryPolicyTests: XCTestCase {
     }
   }
 
-  /// A server asking for a specific window wins outright, including past `maxBackoff`: a server that
-  /// says 60 s means it, and second-guessing it is how a client turns a rate limit into a ban.
-  func testRetryAfterWinsOverTheComputedBackoffAndTheCeiling() {
+  /// A short Retry-After wins over the computed backoff; a long one is capped at `maxBackoff`, so a
+  /// gateway's 503 with an hour's Retry-After cannot hold a call for an hour (audit SDK-1).
+  func testRetryAfterWinsOverTheComputedBackoffButNotTheCeiling() {
     let policy = RetryPolicy.default
 
-    XCTAssertEqual(policy.delay(forRetry: 1, retryAfter: 60), 60, accuracy: 0)
+    XCTAssertEqual(policy.delay(forRetry: 1, retryAfter: 3), 3, accuracy: 0)
+    XCTAssertEqual(policy.delay(forRetry: 1, retryAfter: 3600), policy.maxBackoff, accuracy: 0)
   }
 }

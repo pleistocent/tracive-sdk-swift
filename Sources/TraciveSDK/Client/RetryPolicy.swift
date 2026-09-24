@@ -126,12 +126,13 @@ public struct RetryPolicy: Equatable, Hashable, Sendable {
 
   /// How long to wait before retry number `retryIndex` (1 = the first retry).
   ///
-  /// - Parameter retryAfter: parsed `Retry-After`, when the server sent one. It wins outright when
-  ///   `respectsRetryAfter` is set — including when it is *longer* than `maxBackoff`, because a
-  ///   server asking for 60 s means it.
+  /// - Parameter retryAfter: parsed `Retry-After`, when the server sent one. Honoured when
+  ///   `respectsRetryAfter` is set, but never past `maxBackoff`: only a 5xx reaches here, our server
+  ///   sends no Retry-After on one, and a gateway's 503 with an hour's Retry-After must not hold a
+  ///   call for an hour. Kotlin and Flutter never wait past the ceiling either (audit SDK-1).
   public func delay(forRetry retryIndex: Int, retryAfter: TimeInterval? = nil) -> TimeInterval {
     if respectsRetryAfter, let retryAfter, retryAfter > 0 {
-      return retryAfter
+      return min(retryAfter, maxBackoff)
     }
     let exponent = Double(max(0, retryIndex - 1))
     let raw = initialBackoff * pow(multiplier, exponent)
