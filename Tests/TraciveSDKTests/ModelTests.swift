@@ -29,8 +29,8 @@ final class ModelTests: XCTestCase {
         "reportTotal": 12,
         "credibleReports": 9,
         "ambiguousReports": 3,
-        "firstReportOn": "2025-01-02T03:04:05Z",
-        "lastReportOn": "2026-07-09T10:00:00.250Z",
+        "firstReportOn": "2025-01-15T12:00:00Z",
+        "lastReportOn": "2026-07-15T12:00:00.000Z",
         "fraudAmount": { "IDR": 12500000, "USD": 800.5 },
         "tags": ["investment", "telegram"],
         "relatedScammerCount": 4,
@@ -38,7 +38,7 @@ final class ModelTests: XCTestCase {
           { "chronology": "Asked for a deposit up front", "riskLevel": 3, "incidentDate": "2025-01" }
         ],
         "comments": [
-          { "date": "2025-02-01", "text": "Lost money", "fromCredibleReport": true }
+          { "date": "2025-02", "text": "Lost money", "fromCredibleReport": true }
         ],
         "billing": { "creditSource": "USER", "unitsCharged": 1 },
         "cacheTtlSeconds": 3600,
@@ -54,8 +54,8 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(result.reportTotal, 12)
     XCTAssertEqual(result.credibleReports, 9)
     XCTAssertEqual(result.ambiguousReports, 3)
-    XCTAssertEqual(result.firstReportOn, try instant("2025-01-02T03:04:05Z"))
-    XCTAssertEqual(result.lastReportOn, try instant("2026-07-09T10:00:00.250Z"))
+    XCTAssertEqual(result.firstReportOn, try instant("2025-01-15T12:00:00Z"))
+    XCTAssertEqual(result.lastReportOn, try instant("2026-07-15T12:00:00Z"))
     XCTAssertEqual(result.fraudAmount, ["IDR": 12_500_000, "USD": 800.5])
     XCTAssertEqual(result.tags, ["investment", "telegram"])
     XCTAssertEqual(result.relatedScammerCount, 4)
@@ -163,7 +163,7 @@ final class ModelTests: XCTestCase {
       riskTier: .high,
       reportTotal: 3,
       topChronologies: [Chronology(chronology: "c", riskLevel: 1)],
-      comments: [Comment(date: "2026-01-01", text: "t", fromCredibleReport: true)],
+      comments: [Comment(date: "2026-01", text: "t", fromCredibleReport: true)],
       billing: Billing(creditSource: .user, unitsCharged: 1),
       disclaimer: "d",
       origin: .server,
@@ -207,8 +207,8 @@ final class ModelTests: XCTestCase {
       reportTotal: 5,
       credibleReports: 4,
       ambiguousReports: 1,
-      firstReportOn: try instant("2025-01-02T03:04:05Z"),
-      lastReportOn: try instant("2026-07-09T10:00:00Z"),
+      firstReportOn: try instant("2025-01-15T12:00:00Z"),
+      lastReportOn: try instant("2026-07-15T12:00:00Z"),
       fraudAmount: ["IDR": 5_000_000],
       tags: ["telegram"],
       relatedScammerCount: 2,

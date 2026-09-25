@@ -2,8 +2,8 @@ import Foundation
 
 /// One narrated incident attached to a scammer record (`detail = .full` only).
 ///
-/// `incidentDate` is a **String**, not an instant: the server sends whatever precision the reporter
-/// gave (sometimes only a month), so parsing it into a `Date` would invent precision that is not
+/// `incidentDate` is a **String**, not an instant: the server sends the month as `"YYYY-MM"` (e.g.
+/// `"2026-06"`) and never a day, so parsing it into a `Date` would invent precision that is not
 /// there. Present it verbatim.
 public struct Chronology: Codable, Equatable, Hashable, Sendable {
   public let chronology: String

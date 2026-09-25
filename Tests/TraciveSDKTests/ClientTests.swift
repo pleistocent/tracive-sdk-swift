@@ -2148,10 +2148,10 @@ enum Fixtures {
       "ambiguousReports": 3,
       "relatedScammerCount": 3,
       "topChronologies": [
-        { "chronology": "Minta transfer di muka", "riskLevel": 4, "incidentDate": "2026-05-11" }
+        { "chronology": "Minta transfer di muka", "riskLevel": 4, "incidentDate": "2026-05" }
       ],
       "comments": [
-        { "date": "2026-06-01", "text": "Tidak pernah dikirim", "fromCredibleReport": true }
+        { "date": "2026-06", "text": "Tidak pernah dikirim", "fromCredibleReport": true }
       ],
       "billing": { "creditSource": "USER", "unitsCharged": 1 },
       "disclaimer": "Indikatif, bukan vonis hukum."

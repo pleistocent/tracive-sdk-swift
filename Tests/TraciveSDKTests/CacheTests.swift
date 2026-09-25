@@ -62,8 +62,8 @@ final class CacheTests: XCTestCase {
       reportTotal: reportTotal,
       credibleReports: 5,
       ambiguousReports: 2,
-      firstReportOn: Date(timeIntervalSince1970: 1_700_000_000),
-      lastReportOn: Date(timeIntervalSince1970: 1_790_000_000),
+      firstReportOn: Date(timeIntervalSince1970: 1_700_049_600),  // 2023-11-15T12:00:00Z
+      lastReportOn: Date(timeIntervalSince1970: 1_789_473_600),  // 2026-09-15T12:00:00Z
       fraudAmount: ["IDR": 12_500_000],
       tags: ["investment", "telegram"],
       relatedScammerCount: 3,
@@ -140,8 +140,8 @@ final class CacheTests: XCTestCase {
     XCTAssertEqual(hit.tags, ["investment", "telegram"])
     XCTAssertEqual(hit.relatedScammerCount, 3)
     XCTAssertEqual(hit.disclaimer, "Tracive reports are user-submitted.")
-    XCTAssertEqual(hit.firstReportOn, Date(timeIntervalSince1970: 1_700_000_000))
-    XCTAssertEqual(hit.lastReportOn, Date(timeIntervalSince1970: 1_790_000_000))
+    XCTAssertEqual(hit.firstReportOn, Date(timeIntervalSince1970: 1_700_049_600))
+    XCTAssertEqual(hit.lastReportOn, Date(timeIntervalSince1970: 1_789_473_600))
 
     // `fetchedAt` is the age of the *data*, not of the answer: it must survive the round trip
     // unchanged, or every TTL below is measured from the wrong instant.
@@ -284,9 +284,9 @@ final class CacheTests: XCTestCase {
     let full = makeResult(
       topChronologies: [
         Chronology(chronology: "Paid 5jt for an investment that never returned.", riskLevel: 4,
-                   incidentDate: "2026-05-02")
+                   incidentDate: "2026-05")
       ],
-      comments: [Comment(date: "2026-05-03", text: "Same modus operandi.", fromCredibleReport: true)],
+      comments: [Comment(date: "2026-05", text: "Same modus operandi.", fromCredibleReport: true)],
       billing: Billing(creditSource: .user, unitsCharged: 1, partnerBalanceRemaining: 998)
     )
     XCTAssertNotNil(full.topChronologies)
@@ -320,7 +320,7 @@ final class CacheTests: XCTestCase {
     let secret = "Paid 5jt for an investment that never returned."
     let sealed = try cipher.seal(
       makeResult(
-        topChronologies: [Chronology(chronology: secret, riskLevel: 4, incidentDate: "2026-05-02")]
+        topChronologies: [Chronology(chronology: secret, riskLevel: 4, incidentDate: "2026-05")]
       ),
       for: key
     )

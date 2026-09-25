@@ -50,17 +50,17 @@ final class TransactionCheckTests: XCTestCase {
       reportTotal: 12,
       credibleReports: 9,
       ambiguousReports: 3,
-      firstReportOn: Date(timeIntervalSince1970: 1_700_000_000),
-      lastReportOn: Date(timeIntervalSince1970: 1_790_000_000),
+      firstReportOn: Date(timeIntervalSince1970: 1_700_049_600),  // 2023-11-15T12:00:00Z
+      lastReportOn: Date(timeIntervalSince1970: 1_789_473_600),  // 2026-09-15T12:00:00Z
       fraudAmount: ["IDR": 87_400_000],
       tags: ["investment", "marketplace"],
       relatedScammerCount: 4,
       topChronologies: [
         Chronology(chronology: "Korban ditipu lewat investasi bodong.", riskLevel: 4,
-                   incidentDate: "2026-05-11")
+                   incidentDate: "2026-05")
       ],
       comments: [
-        Comment(date: "2026-05-12", text: "Saya juga kena, nomor yang sama.",
+        Comment(date: "2026-05", text: "Saya juga kena, nomor yang sama.",
                 fromCredibleReport: true)
       ],
       billing: Billing(creditSource: .user, unitsCharged: 1, partnerBalanceRemaining: 47),

@@ -14,7 +14,14 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   public let reportTotal: Int
   public let credibleReports: Int
   public let ambiguousReports: Int
+  /// The month of the earliest matching report.
+  ///
+  /// Month precision only: the server always sends the 15th at 12:00 UTC, which falls in the same
+  /// month in every time zone. Show the month and year (e.g. "Jul 2026"). Never show the day or
+  /// compute with it, such as "3 days ago": an exact date could help identify the reporter.
   public let firstReportOn: Date?
+  /// The month of the most recent matching report. Month precision only, exactly like
+  /// `firstReportOn`.
   public let lastReportOn: Date?
   /// Currency code → reported fraud amount, e.g. `["IDR": 12_500_000]`.
   public let fraudAmount: [String: Double]

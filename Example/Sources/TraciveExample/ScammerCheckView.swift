@@ -178,8 +178,9 @@ public struct ScammerCheckView: View {
         if result.relatedScammerCount > 0 {
           statRow("Linked accounts", "\(result.relatedScammerCount)")
         }
+        // Month precision only: the day in this `Date` carries no meaning, so never show it.
         if let last = result.lastReportOn {
-          statRow("Last report", last.formatted(date: .abbreviated, time: .omitted))
+          statRow("Last report", last.formatted(.dateTime.month(.abbreviated).year()))
         }
       }
 

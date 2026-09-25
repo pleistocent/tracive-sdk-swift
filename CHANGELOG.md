@@ -55,6 +55,14 @@ source compatibility until the API freezes at 1.0.
   where they may live. What may go to your server is the user's decision — `riskAccepted`,
   `riskAcceptedAt` — which is the audit trail you can defend and contains no result.
 
+### Changed
+- **Report dates now carry month precision only.** The Tracive API sends `firstReportOn` and
+  `lastReportOn` as the 15th of the month at 12:00 UTC, and `Chronology.incidentDate` and
+  `Comment.date` as `"YYYY-MM"`. Show month and year only (e.g. "Jul 2026") — never the day, and
+  nothing computed from it such as "3 days ago": an exact date could help identify the reporter. This
+  is a server change, so it reaches installed apps whatever SDK version they run; the SDK's types and
+  decoding are unchanged. The example now renders the month this way.
+
 ### Breaking
 - **The server TTL override is gone: `CachePolicy.honorsServerTtlOverride`, both `effectiveTtl`
   overloads and `CheckResult.cacheTtlSeconds` are all removed.** The backend stopped sending

@@ -2,8 +2,8 @@ import Foundation
 
 /// A free-text comment left on a scammer record (`detail = .full` only).
 ///
-/// `date` is a **String** for the same reason as `Chronology.incidentDate`: the server sends a
-/// display date, not a normalised instant.
+/// `date` is a **String** for the same reason as `Chronology.incidentDate`: the server sends the
+/// month it was posted as `"YYYY-MM"` (e.g. `"2026-06"`), a display string rather than an instant.
 ///
 /// `fromCredibleReport` distinguishes a comment attached to a report that passed Tracive's
 /// credibility checks from one that did not — surface the difference in any UI.
