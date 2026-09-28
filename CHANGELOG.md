@@ -56,14 +56,19 @@ source compatibility until the API freezes at 1.0.
   `riskAcceptedAt` — which is the audit trail you can defend and contains no result.
 
 ### Changed
-- **Report dates now carry month precision only.** The Tracive API sends `firstReportOn` and
-  `lastReportOn` as the 15th of the month at 12:00 UTC, and `Chronology.incidentDate` and
-  `Comment.date` as `"YYYY-MM"`. Show month and year only (e.g. "Jul 2026") — never the day, and
-  nothing computed from it such as "3 days ago": an exact date could help identify the reporter. This
-  is a server change, so it reaches installed apps whatever SDK version they run; the SDK's types and
-  decoding are unchanged. The example now renders the month this way.
+- **Report dates now carry month precision only.** Show month and year only (e.g. "Jul 2026") —
+  never a day, and nothing computed from one such as "3 days ago": an exact date could help identify
+  the reporter. The example now renders the month this way, from month symbols rather than a parsed
+  date.
 
 ### Breaking
+- **`CheckResult.firstReportOn` and `lastReportOn` are now `String?` holding `"YYYY-MM"`
+  (e.g. `"2026-06"`), not `Date?`.** The Tracive API now sends them as month strings, the same shape
+  as `Chronology.incidentDate` and `Comment.date` already had, so exact report dates never leave the
+  server. A value that begins with a valid `YYYY-MM` keeps just those seven characters, so an ISO
+  date-time from an older server — or from a cache record written by an earlier build — still reads
+  as its month; anything else reads as `nil`. Cache records are written with the month string.
+  Callers that formatted the `Date` should format the month string instead, without inventing a day.
 - **The server TTL override is gone: `CachePolicy.honorsServerTtlOverride`, both `effectiveTtl`
   overloads and `CheckResult.cacheTtlSeconds` are all removed.** The backend stopped sending
   `cacheTtlSeconds` because its per-tier ladder was a copy of the one every SDK already has

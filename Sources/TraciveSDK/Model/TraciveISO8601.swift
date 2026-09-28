@@ -2,8 +2,7 @@ import Foundation
 
 /// The single ISO-8601 gateway used by every instant on the wire.
 ///
-/// The spec describes `firstReportOn`, `lastReportOn`, `nextResetAt`, `memberSince` and
-/// `fetchedAt` as "ISO-8601 UTC". All parsing and formatting goes through here so the three SDKs
+/// The spec describes `nextResetAt`, `memberSince` and `fetchedAt` as "ISO-8601 UTC". All parsing and formatting goes through here so the three SDKs
 /// agree byte-for-byte and so we allocate the (expensive) formatters exactly once.
 ///
 /// Parsing accepts both the whole-second form (`2026-07-09T10:00:00Z`) and the fractional-second

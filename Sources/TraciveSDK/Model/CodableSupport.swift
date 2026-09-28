@@ -45,6 +45,22 @@ extension KeyedDecodingContainer {
     return TraciveISO8601.date(from: raw)
   }
 
+  /// Reads a `"YYYY-MM"` month, keeping only that prefix of a longer value. An ISO date-time
+  /// from a server or cache record older than the month-string contract still yields its month;
+  /// anything else reads as `nil`.
+  func traciveYearMonthIfPresent(_ key: Key) -> String? {
+    guard let raw = traciveStringIfPresent(key) else { return nil }
+    let prefix = Array(raw.utf8.prefix(7))
+    guard prefix.count == 7, prefix[4] == UInt8(ascii: "-") else { return nil }
+    let digits = prefix[0..<4] + prefix[5..<7]
+    guard digits.allSatisfy({ $0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9") }) else {
+      return nil
+    }
+    let month = Int(prefix[5] - UInt8(ascii: "0")) * 10 + Int(prefix[6] - UInt8(ascii: "0"))
+    guard (1...12).contains(month) else { return nil }
+    return String(decoding: prefix, as: UTF8.self)
+  }
+
   /// Reads `[String]`, defaulting to `defaultValue` when absent or unusable.
   func traciveStringArray(_ key: Key, default defaultValue: [String]) -> [String] {
     ((try? decodeIfPresent([String].self, forKey: key)) ?? nil) ?? defaultValue

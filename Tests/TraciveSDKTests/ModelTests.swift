@@ -29,8 +29,8 @@ final class ModelTests: XCTestCase {
         "reportTotal": 12,
         "credibleReports": 9,
         "ambiguousReports": 3,
-        "firstReportOn": "2025-01-15T12:00:00Z",
-        "lastReportOn": "2026-07-15T12:00:00.000Z",
+        "firstReportOn": "2025-01",
+        "lastReportOn": "2026-07",
         "fraudAmount": { "IDR": 12500000, "USD": 800.5 },
         "tags": ["investment", "telegram"],
         "relatedScammerCount": 4,
@@ -54,8 +54,8 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(result.reportTotal, 12)
     XCTAssertEqual(result.credibleReports, 9)
     XCTAssertEqual(result.ambiguousReports, 3)
-    XCTAssertEqual(result.firstReportOn, try instant("2025-01-15T12:00:00Z"))
-    XCTAssertEqual(result.lastReportOn, try instant("2026-07-15T12:00:00Z"))
+    XCTAssertEqual(result.firstReportOn, "2025-01")
+    XCTAssertEqual(result.lastReportOn, "2026-07")
     XCTAssertEqual(result.fraudAmount, ["IDR": 12_500_000, "USD": 800.5])
     XCTAssertEqual(result.tags, ["investment", "telegram"])
     XCTAssertEqual(result.relatedScammerCount, 4)
@@ -143,6 +143,29 @@ final class ModelTests: XCTestCase {
     // throw — if it threw, `decode` would have failed before any assertion here ran.
   }
 
+  /// A server or cache record from before the month-string contract sent an ISO date-time; it
+  /// must still read as its month, and nothing finer.
+  func testReportMonthsKeepOnlyTheYearMonthPrefix() throws {
+    let legacy = try decode(
+      CheckResult.self,
+      #"{ "found": true, "riskTier": "HIGH", "firstReportOn": "2025-01-15T12:00:00Z", "lastReportOn": "2026-06-15T12:00:00.000Z" }"#
+    )
+    XCTAssertEqual(legacy.firstReportOn, "2025-01")
+    XCTAssertEqual(legacy.lastReportOn, "2026-06")
+
+    for garbage in ["not-a-date", "2026-13", "2026-6", "26-06-15", "", "2026/06"] {
+      let json = #"{ "found": true, "riskTier": "HIGH", "lastReportOn": "\#(garbage)" }"#
+      XCTAssertNil(try decode(CheckResult.self, json).lastReportOn, garbage)
+    }
+    let wrongType = try decode(
+      CheckResult.self, #"{ "found": true, "riskTier": "HIGH", "lastReportOn": 202606 }"#)
+    XCTAssertNil(wrongType.lastReportOn)
+
+    let encoded = try JSONEncoder().encode(legacy)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    XCTAssertEqual(object["lastReportOn"] as? String, "2026-06")
+  }
+
   func testIso8601AcceptsWholeSecondsFractionsAndOffsets() throws {
     let whole = try instant("2026-07-09T10:00:00Z")
     let fractional = try instant("2026-07-09T10:00:00.000Z")
@@ -207,8 +230,8 @@ final class ModelTests: XCTestCase {
       reportTotal: 5,
       credibleReports: 4,
       ambiguousReports: 1,
-      firstReportOn: try instant("2025-01-15T12:00:00Z"),
-      lastReportOn: try instant("2026-07-15T12:00:00Z"),
+      firstReportOn: "2025-01",
+      lastReportOn: "2026-07",
       fraudAmount: ["IDR": 5_000_000],
       tags: ["telegram"],
       relatedScammerCount: 2,

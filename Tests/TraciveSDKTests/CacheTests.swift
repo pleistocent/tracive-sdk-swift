@@ -62,8 +62,8 @@ final class CacheTests: XCTestCase {
       reportTotal: reportTotal,
       credibleReports: 5,
       ambiguousReports: 2,
-      firstReportOn: Date(timeIntervalSince1970: 1_700_049_600),  // 2023-11-15T12:00:00Z
-      lastReportOn: Date(timeIntervalSince1970: 1_789_473_600),  // 2026-09-15T12:00:00Z
+      firstReportOn: "2023-11",
+      lastReportOn: "2026-09",
       fraudAmount: ["IDR": 12_500_000],
       tags: ["investment", "telegram"],
       relatedScammerCount: 3,
@@ -140,8 +140,8 @@ final class CacheTests: XCTestCase {
     XCTAssertEqual(hit.tags, ["investment", "telegram"])
     XCTAssertEqual(hit.relatedScammerCount, 3)
     XCTAssertEqual(hit.disclaimer, "Tracive reports are user-submitted.")
-    XCTAssertEqual(hit.firstReportOn, Date(timeIntervalSince1970: 1_700_049_600))
-    XCTAssertEqual(hit.lastReportOn, Date(timeIntervalSince1970: 1_789_473_600))
+    XCTAssertEqual(hit.firstReportOn, "2023-11")
+    XCTAssertEqual(hit.lastReportOn, "2026-09")
 
     // `fetchedAt` is the age of the *data*, not of the answer: it must survive the round trip
     // unchanged, or every TTL below is measured from the wrong instant.

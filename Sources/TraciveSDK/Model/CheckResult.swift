@@ -14,15 +14,14 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   public let reportTotal: Int
   public let credibleReports: Int
   public let ambiguousReports: Int
-  /// The month of the earliest matching report.
+  /// The month of the earliest matching report, as `"YYYY-MM"` (e.g. `"2026-06"`).
   ///
-  /// Month precision only: the server always sends the 15th at 12:00 UTC, which falls in the same
-  /// month in every time zone. Show the month and year (e.g. "Jul 2026"). Never show the day or
-  /// compute with it, such as "3 days ago": an exact date could help identify the reporter.
-  public let firstReportOn: Date?
-  /// The month of the most recent matching report. Month precision only, exactly like
-  /// `firstReportOn`.
-  public let lastReportOn: Date?
+  /// A **String** for the same reason as `Chronology.incidentDate`: the server never sends a day.
+  /// Show the month and year only (e.g. "Jun 2026"), and nothing computed from a day such as
+  /// "3 days ago": an exact date could help identify the reporter.
+  public let firstReportOn: String?
+  /// The month of the most recent matching report, as `"YYYY-MM"`, exactly like `firstReportOn`.
+  public let lastReportOn: String?
   /// Currency code → reported fraud amount, e.g. `["IDR": 12_500_000]`.
   public let fraudAmount: [String: Double]
   public let tags: [String]
@@ -48,8 +47,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     reportTotal: Int = 0,
     credibleReports: Int = 0,
     ambiguousReports: Int = 0,
-    firstReportOn: Date? = nil,
-    lastReportOn: Date? = nil,
+    firstReportOn: String? = nil,
+    lastReportOn: String? = nil,
     fraudAmount: [String: Double] = [:],
     tags: [String] = [],
     relatedScammerCount: Int = 0,
@@ -212,8 +211,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     self.reportTotal = container.traciveInt(.reportTotal, default: 0)
     self.credibleReports = container.traciveInt(.credibleReports, default: 0)
     self.ambiguousReports = container.traciveInt(.ambiguousReports, default: 0)
-    self.firstReportOn = container.traciveDateIfPresent(.firstReportOn)
-    self.lastReportOn = container.traciveDateIfPresent(.lastReportOn)
+    self.firstReportOn = container.traciveYearMonthIfPresent(.firstReportOn)
+    self.lastReportOn = container.traciveYearMonthIfPresent(.lastReportOn)
     self.fraudAmount = container.traciveDoubleMap(.fraudAmount, default: [:])
     self.tags = container.traciveStringArray(.tags, default: [])
     self.relatedScammerCount = container.traciveInt(.relatedScammerCount, default: 0)
@@ -237,8 +236,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     try container.encode(reportTotal, forKey: .reportTotal)
     try container.encode(credibleReports, forKey: .credibleReports)
     try container.encode(ambiguousReports, forKey: .ambiguousReports)
-    try container.traciveEncodeISO8601IfPresent(firstReportOn, forKey: .firstReportOn)
-    try container.traciveEncodeISO8601IfPresent(lastReportOn, forKey: .lastReportOn)
+    try container.encodeIfPresent(firstReportOn, forKey: .firstReportOn)
+    try container.encodeIfPresent(lastReportOn, forKey: .lastReportOn)
     try container.encode(fraudAmount, forKey: .fraudAmount)
     try container.encode(tags, forKey: .tags)
     try container.encode(relatedScammerCount, forKey: .relatedScammerCount)

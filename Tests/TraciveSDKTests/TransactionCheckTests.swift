@@ -50,8 +50,8 @@ final class TransactionCheckTests: XCTestCase {
       reportTotal: 12,
       credibleReports: 9,
       ambiguousReports: 3,
-      firstReportOn: Date(timeIntervalSince1970: 1_700_049_600),  // 2023-11-15T12:00:00Z
-      lastReportOn: Date(timeIntervalSince1970: 1_789_473_600),  // 2026-09-15T12:00:00Z
+      firstReportOn: "2023-11",
+      lastReportOn: "2026-09",
       fraudAmount: ["IDR": 87_400_000],
       tags: ["investment", "marketplace"],
       relatedScammerCount: 4,

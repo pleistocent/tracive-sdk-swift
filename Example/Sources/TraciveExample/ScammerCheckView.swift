@@ -178,9 +178,8 @@ public struct ScammerCheckView: View {
         if result.relatedScammerCount > 0 {
           statRow("Linked accounts", "\(result.relatedScammerCount)")
         }
-        // Month precision only: the day in this `Date` carries no meaning, so never show it.
         if let last = result.lastReportOn {
-          statRow("Last report", last.formatted(.dateTime.month(.abbreviated).year()))
+          statRow("Last report", monthYear(last))
         }
       }
 
@@ -268,6 +267,16 @@ public struct ScammerCheckView: View {
     case .caution: return .yellow
     case .none: return .green
     }
+  }
+
+  /// `"2026-07"` → `"Jul 2026"`, built from month symbols so no day is ever invented.
+  private func monthYear(_ yearMonth: String) -> String {
+    let parts = yearMonth.split(separator: "-")
+    let symbols = DateFormatter().shortMonthSymbols ?? []
+    guard parts.count == 2, let month = Int(parts[1]), symbols.indices.contains(month - 1) else {
+      return yearMonth
+    }
+    return "\(symbols[month - 1]) \(parts[0])"
   }
 
   private func relative(_ date: Date) -> String {
