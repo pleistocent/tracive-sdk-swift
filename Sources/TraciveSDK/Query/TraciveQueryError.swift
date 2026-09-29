@@ -28,6 +28,9 @@ public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
   /// hit.
   case emptyAccountId = "empty_account_id"
   case emptyBankCode = "empty_bank_code"
+  /// The national bank code or BIC is malformed, or the SDK's bank-code table does not list it for
+  /// that country. No key built from it could hit, so it is rejected locally and never billed.
+  case unknownBankCode = "unknown_bank_code"
   /// Empty value for a single-value input. Email is the only remaining user: an empty crypto
   /// address and an empty username platform have their own reasons below, so a caller can put the
   /// message on the field that is actually blank.
@@ -88,6 +91,8 @@ public struct TraciveQueryError: Error, Equatable, Hashable, Sendable, CustomStr
       return "The account number is empty."
     case .emptyBankCode:
       return "The bank code is empty."
+    case .unknownBankCode:
+      return "That bank code or BIC is not one Tracive lists for this country."
     case .emptyValue:
       return "The value is empty."
     case .emptyAddress:

@@ -533,6 +533,9 @@ flowchart TD
   B3["account uppercase, then remove whitespace and ASCII hyphens"]
   B4["BANK_ country _ bankCode _ accountId"]
 
+  BS["TraciveQuery.bankAccount(countryAlpha3:bankShortCode:account:) or (countryAlpha3:bic:account:)"]
+  BS1["fold the country the same way, then look the code up in the embedded bank-code table"]
+
   I["TraciveQuery.iban(iban:)"]
   I1["uppercase, then remove whitespace and ASCII hyphens"]
   I2["BANK_IBAN_ plus the accountId"]
@@ -565,6 +568,9 @@ flowchart TD
   E2 -->|"yes"| E3 --> G
 
   B --> B1 --> B2 --> B3 --> B4 --> G
+  BS --> BS1
+  BS1 -->|"country not three ASCII letters, or code not listed"| REJ
+  BS1 -->|"the table's bankCode"| B2
   B1 -->|"not three ASCII letters"| REJ
   B2 -->|"empty"| REJ
   B3 -->|"empty"| REJ
@@ -605,6 +611,11 @@ flowchart TD
 - **`DocumentIdGuard`** rejects a key that is empty, contains `/`, is `.` or `..`, exceeds 1500 UTF-8
   bytes, or matches the API's reserved `__…__` shape — matched with JavaScript's regex semantics,
   which accept a middle containing a line terminator.
+- **A national bank code or BIC is translated, never keyed as sent.** A short code is NFC, uppercase,
+  then stripped of whitespace, `.` and `-`, and an all-digit one also matches with its leading zeros
+  removed. A BIC is NFC, uppercase and stripped of whitespace, must have the 8- or 11-character BIC
+  shape, and is looked up by its first 8 within the given country only. The table is parsed once, on
+  first use; an unlisted code is rejected with `unknown_bank_code`.
 - **There is no `domain()` builder.** The API indexes only PHONE, EMAIL, BANK, CRYPTO and USERNAME. A
   `DOMAIN_…` key would miss every time and you would be charged for every one of those misses.
 

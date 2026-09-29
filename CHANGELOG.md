@@ -8,6 +8,15 @@ source compatibility until the API freezes at 1.0.
 ## [Unreleased]
 
 ### Added
+- **A bank account can be named by its national bank code or its BIC.**
+  `bankAccount(countryAlpha3:bankShortCode:account:)` and `bankAccount(countryAlpha3:bic:account:)`
+  take the code your records already hold (`014`, `CENAIDJA`) and translate it to Tracive's
+  `bankCode` through a table shipped inside the SDK, so they build exactly the key `bankCode: "BCA"`
+  builds and hit the same cache entries. It works offline; the table is parsed once, on first use.
+  A code the table does not list for that country throws the new
+  `QueryRejectionReason.unknownBankCode` (`unknown_bank_code`) before any request, so it is never
+  billed. A `switch` over `QueryRejectionReason` with no `default` gains a case. The grammar fixture
+  moves to v6.
 - **Three newer server error codes now have a type.** `user_credit_not_permitted` and
   `translation_not_permitted` (both 403 on a check) map to the new cases
   `.userCreditNotPermitted` and `.translationNotPermitted` instead of `.unknown`, with matching

@@ -94,6 +94,8 @@ final class QueryGrammarTests: XCTestCase {
     let value: String?
     let country: String?
     let bankCode: String?
+    let bankShortCode: String?
+    let bic: String?
     let accountId: String?
     let isIban: Bool?
     let iban: String?
@@ -191,10 +193,23 @@ final class QueryGrammarTests: XCTestCase {
       if input.isIban == true {
         return try TraciveQuery.iban(iban: try XCTUnwrap(input.iban))
       }
+      let country = try XCTUnwrap(input.country)
+      let account = try XCTUnwrap(input.accountId)
+      // Exactly one way of naming the bank, so a vector cannot be driven through a factory other
+      // than the one its input names.
+      let selectors = [input.bankCode, input.bankShortCode, input.bic].compactMap { $0 }
+      guard selectors.count == 1 else { throw AmbiguousBankInput(selectors: selectors) }
+      if let bankShortCode = input.bankShortCode {
+        return try TraciveQuery.bankAccount(
+          countryAlpha3: country, bankShortCode: bankShortCode, account: account)
+      }
+      if let bic = input.bic {
+        return try TraciveQuery.bankAccount(countryAlpha3: country, bic: bic, account: account)
+      }
       return try TraciveQuery.bankAccount(
-        countryAlpha3: try XCTUnwrap(input.country),
+        countryAlpha3: country,
         bankCode: try XCTUnwrap(input.bankCode),
-        account: try XCTUnwrap(input.accountId)
+        account: account
       )
     case "CRYPTO":
       return try TraciveQuery.crypto(
@@ -216,6 +231,7 @@ final class QueryGrammarTests: XCTestCase {
   }
 
   private struct UnknownVectorType: Error { let type: String }
+  private struct AmbiguousBankInput: Error { let selectors: [String] }
   private struct RawEntryNotRejected: Error { let value: String }
 
   // MARK: - Tests
@@ -263,13 +279,13 @@ final class QueryGrammarTests: XCTestCase {
   func testFixtureIsTheExpectedContract() throws {
     let fixture = try loadFixture()
 
-    XCTAssertEqual(fixture.version, 5, "fixture schema version changed — re-read the rules")
+    XCTAssertEqual(fixture.version, 6, "fixture schema version changed — re-read the rules")
 
     // Pinned counts, not just non-emptiness. The fixture is vendored byte-identically into every
     // SDK; a vector silently dropped during a re-vendor would otherwise leave this suite green
     // while the contract shrank.
-    XCTAssertEqual(fixture.vectors.count, 34, "a vector was added or removed — re-read the fixture")
-    XCTAssertEqual(fixture.rejected.count, 14, "a rejection case was added or removed")
+    XCTAssertEqual(fixture.vectors.count, 42, "a vector was added or removed — re-read the fixture")
+    XCTAssertEqual(fixture.rejected.count, 21, "a rejection case was added or removed")
     XCTAssertEqual(
       fixture.documentIdGuard.cases.count,
       9,

@@ -154,6 +154,37 @@ enum QueryFolding {
     return folded
   }
 
+  /// National bank code, folded the way the bank-code table stores it: NFC, uppercase, then remove
+  /// every whitespace character, `.` and `-` anywhere in it (`replace(/[\s.-]/g, "")`).
+  static func foldBankShortCode(_ raw: String) -> String {
+    let upper = raw.precomposedStringWithCanonicalMapping.uppercased()
+    return String(
+      String.UnicodeScalarView(
+        upper.unicodeScalars.filter { !javaScriptWhitespace.contains($0) && $0 != "." && $0 != "-" }
+      )
+    )
+  }
+
+  /// BIC: NFC, uppercase, remove every whitespace character; then it must match
+  /// `^[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?$`. Returns the first 8 characters — the
+  /// institution without its branch — or nil when it is not a BIC.
+  static func foldBic(_ raw: String) -> String? {
+    let upper = raw.precomposedStringWithCanonicalMapping.uppercased()
+    let scalars = Array(upper.unicodeScalars.filter { !javaScriptWhitespace.contains($0) })
+    guard scalars.count == 8 || scalars.count == 11 else { return nil }
+    for (index, scalar) in scalars.enumerated() {
+      guard isAsciiUppercaseLetter(scalar) || (index >= 6 && isAsciiDigit(scalar)) else {
+        return nil
+      }
+    }
+    return String(String.UnicodeScalarView(scalars.prefix(8)))
+  }
+
+  /// `/^\d+$/`: non-empty, and ASCII digits only.
+  static func isAsciiDigits(_ value: String) -> Bool {
+    !value.isEmpty && value.unicodeScalars.allSatisfy(isAsciiDigit)
+  }
+
   // MARK: - CRYPTO
 
   /// Chain: NFC, uppercase, trim.

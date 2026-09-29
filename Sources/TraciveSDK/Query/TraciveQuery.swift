@@ -3,8 +3,9 @@ import Foundation
 /// A validated, folded lookup key for one identifier.
 ///
 /// Build one with a factory — `TraciveQuery.phone(e164:)`, `.email(value:)`,
-/// `.bankAccount(countryAlpha3:bankCode:account:)`, `.iban(iban:)`, `.crypto(chain:address:)`,
-/// `.username(platform:handle:)` — and hand it to `checkScammer`.
+/// `.bankAccount(countryAlpha3:bankCode:account:)` (or `bankShortCode:` / `bic:` in place of
+/// `bankCode:`), `.iban(iban:)`, `.crypto(chain:address:)`, `.username(platform:handle:)` — and
+/// hand it to `checkScammer`.
 ///
 /// Two things happen at construction time, both before any network call can be made:
 ///
@@ -28,7 +29,7 @@ public struct TraciveQuery: Equatable, Hashable, Sendable, CustomStringConvertib
   public enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
     case phone = "PHONE"
     case email = "EMAIL"
-    /// Covers both `bankAccount(countryAlpha3:bankCode:account:)` and `iban(iban:)`.
+    /// Covers every `bankAccount(countryAlpha3:…)` overload and `iban(iban:)`.
     case bank = "BANK"
     case crypto = "CRYPTO"
     case username = "USERNAME"
@@ -86,6 +87,57 @@ public struct TraciveQuery: Equatable, Hashable, Sendable, CustomStringConvertib
     let code = try QueryFolding.foldBankCode(bankCode)
     let accountId = try QueryFolding.foldAccountId(account)
     return try TraciveQuery(kind: .bank, searchQueryIndex: "BANK_\(country)_\(code)_\(accountId)")
+  }
+
+  /// Domestic bank account, with the bank named by its national bank code.
+  ///
+  /// The code is translated to Tracive's `bankCode` through a table shipped inside the SDK, so this
+  /// builds exactly the key `bankAccount(countryAlpha3:bankCode:account:)` builds for that bank —
+  /// `IDN` + `014` gives the same key as `IDN` + `BCA`. Case, whitespace, `.` and `-` are ignored,
+  /// and leading zeros are optional: `14` finds `014`.
+  ///
+  /// - Parameters:
+  ///   - countryAlpha3: ISO 3166-1 **alpha-3**, e.g. `IDN`. Checked before the code is looked up.
+  ///   - bankShortCode: the national bank code, e.g. `014`.
+  ///   - account: as for `bankAccount(countryAlpha3:bankCode:account:)`.
+  /// - Throws: `TraciveQueryError` with `.unknownBankCode` when the table does not list the code
+  ///   for that country.
+  public static func bankAccount(
+    countryAlpha3: String,
+    bankShortCode: String,
+    account: String
+  ) throws -> TraciveQuery {
+    let country = try QueryFolding.foldCountryAlpha3(countryAlpha3)
+    guard let bankCode = BankCodes.bankCode(country: country, shortCode: bankShortCode) else {
+      throw TraciveQueryError(.unknownBankCode)
+    }
+    return try bankAccount(countryAlpha3: country, bankCode: bankCode, account: account)
+  }
+
+  /// Domestic bank account, with the bank named by its BIC.
+  ///
+  /// Translated like `bankAccount(countryAlpha3:bankShortCode:account:)`, from the same table, so
+  /// this builds the key `bankAccount(countryAlpha3:bankCode:account:)` builds for that bank. An
+  /// 11-character BIC is looked up by its first 8 (the branch is ignored); case and whitespace are
+  /// ignored.
+  ///
+  /// - Parameters:
+  ///   - countryAlpha3: ISO 3166-1 **alpha-3**, e.g. `IDN`. A BIC is looked up within this country
+  ///     only.
+  ///   - bic: e.g. `CENAIDJA` or `CENAIDJAXXX`.
+  ///   - account: as for `bankAccount(countryAlpha3:bankCode:account:)`.
+  /// - Throws: `TraciveQueryError` with `.unknownBankCode` when the BIC is malformed or the table
+  ///   does not list it for that country.
+  public static func bankAccount(
+    countryAlpha3: String,
+    bic: String,
+    account: String
+  ) throws -> TraciveQuery {
+    let country = try QueryFolding.foldCountryAlpha3(countryAlpha3)
+    guard let bankCode = BankCodes.bankCode(country: country, bic: bic) else {
+      throw TraciveQueryError(.unknownBankCode)
+    }
+    return try bankAccount(countryAlpha3: country, bankCode: bankCode, account: account)
   }
 
   /// International bank account number. Printed grouping and case are presentational and are

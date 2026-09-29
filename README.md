@@ -212,6 +212,19 @@ try TraciveQuery.crypto(chain: "ETH", address: "0x52908400098527886e0f7030069857
 try TraciveQuery.username(platform: "INSTAGRAM", handle: "@scammerx")
 ```
 
+`bankAccount` also takes the bank the way your own records may already name it — the national bank
+code or the BIC:
+
+```swift
+try TraciveQuery.bankAccount(countryAlpha3: "IDN", bankShortCode: "014", account: "3242424242")
+try TraciveQuery.bankAccount(countryAlpha3: "IDN", bic: "CENAIDJA", account: "3242424242")
+```
+
+Both are translated to Tracive's `bankCode` through a table that ships inside the SDK, offline, so
+each builds exactly the key `bankCode: "BCA"` builds and shares its cache entries. Leading zeros are
+optional (`14` finds `014`), and an 11-character BIC is looked up by its first 8. A code the table
+does not list for that country throws `.unknownBankCode` before any request, so it is never billed.
+
 **Validation is a cost control, not just hygiene.** A miss is billed the same as a hit, so a key that
 cannot possibly hit — a local-format phone number, an alpha-2 country code, an empty account, a
 value with no `@` passed to `email` — is a credit spent on nothing. The builders reject those
