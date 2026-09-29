@@ -177,7 +177,7 @@ final class BankCodeTests: XCTestCase {
       "CENAIDJAX",  // 9
       "CENAIDJAXX",  // 10
       "CENAIDJAXXXX",  // 12
-      "CENAID1A",  // a digit in the country part
+      "CENA1DJA",  // a digit in the country part
       "CENA-IDJA",  // '-' is not stripped from a BIC
       "CENA.IDJA",
       "",
