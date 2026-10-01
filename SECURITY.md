@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-**Email `security@tracive.id`.** Please do not open a public GitHub issue, and please do not post
+**Email `developer@pleistocent.com`.** Please do not open a public GitHub issue, and please do not post
 details in a pull request or a discussion thread — this SDK sits in the fraud-warning path of other
 people's apps, and a public disclosure before a fix is available puts their users at risk, not ours.
 
@@ -40,7 +40,7 @@ below, and gives us a reasonable window to fix things before going public.
   `query-grammar-vectors.json` specifies,
 - anything that lets a caller be charged for a check they did not make.
 
-**Out of scope here** — report these to `security@tracive.id` as well, but they are not defects in
+**Out of scope here** — report these to `developer@pleistocent.com` as well, but they are not defects in
 this package:
 
 - the Tracive backend and the Open API,
