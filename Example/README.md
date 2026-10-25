@@ -133,5 +133,5 @@ UI. The demo stays the stub: an example that needs credentials and a reachable h
 run on a fresh clone.
 
 For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive` and
-`tracivedev` (the app's `Info.plist` has both) and a Universal Link redirect URI — see
+`tracivesandbox` (the app's `Info.plist` has both) and a Universal Link redirect URI — see
 [`../Docs/integration.md`](../Docs/integration.md).

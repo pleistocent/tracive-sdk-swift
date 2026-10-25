@@ -382,7 +382,9 @@ final class OAuthTests: XCTestCase {
 
   func testPresenceProbeUsesTheEnvironmentScheme() {
     XCTAssertEqual(TraciveAppPresence.probeURL(for: .production).scheme, "tracive")
-    XCTAssertEqual(TraciveAppPresence.probeURL(for: .sandbox).scheme, "tracivedev")
+    XCTAssertEqual(TraciveAppPresence.probeURL(for: .sandbox).scheme, "tracivesandbox")
+    let custom = URL(string: "https://proxy.partner.test")!
+    XCTAssertEqual(TraciveAppPresence.probeURL(for: .custom(baseUrl: custom)).scheme, "tracive")
   }
 
   func testInstalledAppReceivesTheAuthorizeURL() async throws {

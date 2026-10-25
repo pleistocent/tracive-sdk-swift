@@ -47,13 +47,13 @@
     canOpenURL answers false on every device, installed or not.
 
     Both entries because the probe follows `environment`: `tracive` is the production app,
-    `tracivedev` the sandbox build — the sandbox and production flavors use one each. See
+    `tracivesandbox` the sandbox build — the sandbox and production flavors use one each. See
     Docs/integration.md.
   -->
   <key>LSApplicationQueriesSchemes</key>
   <array>
     <string>tracive</string>
-    <string>tracivedev</string>
+    <string>tracivesandbox</string>
   </array>
 
   <!--
