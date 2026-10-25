@@ -38,7 +38,7 @@ public enum TraciveAppPresence {
   /// design — a production app never handles a sandbox consent, and neither claims the other's
   /// scheme. The scheme is what this SDK probes for; the sandbox build's application id is not
   /// something it needs, so it is not named here.
-  public static let sandboxScheme = "tracivedev"
+  public static let sandboxScheme = "tracivesandbox"
 
   /// The `Info.plist` key the **host app** must populate for the pre-check to work.
   ///

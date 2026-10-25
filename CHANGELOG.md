@@ -71,6 +71,11 @@ source compatibility until the API freezes at 1.0.
   date.
 
 ### Breaking
+- **Sandbox now probes for the Tracive sandbox app, URL scheme `tracivesandbox`.** It probed
+  `tracivedev://`, which now belongs to an internal build that claims no authorize host, so it can
+  never answer a sandbox consent. `TraciveAppPresence.sandboxScheme` changes value. If you run
+  against sandbox, replace `tracivedev` with `tracivesandbox` in `LSApplicationQueriesSchemes`.
+  Production, `.custom` and the sandbox API and authorize hosts are unchanged.
 - **`CheckResult.firstReportOn` and `lastReportOn` are now `String?` holding `"YYYY-MM"`
   (e.g. `"2026-06"`), not `Date?`.** The Tracive API now sends them as month strings, the same shape
   as `Chronology.incidentDate` and `Comment.date` already had, so exact report dates never leave the
