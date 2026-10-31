@@ -1,6 +1,6 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 7,
+  "version": 8,
   "countryCount": 245,
   "vectors": [
     {
@@ -122,6 +122,114 @@
       "input": "0857 1860 9079",
       "expected": "+6285718609079",
       "note": "ASCII spaces around the country code are still trimmed"
+    },
+    {
+      "country": "HUN",
+      "input": "06 30 123 4567",
+      "expected": "+36301234567",
+      "note": "Hungary: the trunk prefix is 06, dropped as a pair"
+    },
+    {
+      "country": "HUN",
+      "input": "+36 30 123 4567",
+      "expected": "+36301234567",
+      "note": "the same Hungarian number already international folds to the same key"
+    },
+    {
+      "country": "HUN",
+      "input": "06 62 123 456",
+      "expected": "+3662123456",
+      "note": "Szeged's area code 62 starts with 6, so only 06 is the prefix: never 0 and then 6 on its own"
+    },
+    {
+      "country": "BLR",
+      "input": "8 029 123 45 67",
+      "expected": "+375291234567",
+      "note": "Belarus: trunk prefix 8, then the 0 written before the area or operator code"
+    },
+    {
+      "country": "BLR",
+      "input": "+375 29 123 45 67",
+      "expected": "+375291234567",
+      "note": "the same Belarusian number already international folds to the same key"
+    },
+    {
+      "country": "BLR",
+      "input": "8 801 123 4567",
+      "expected": "+3758011234567",
+      "note": "Belarusian freephone numbers start with 8 themselves, so the trunk 8 is dropped only on 11 digits"
+    },
+    {
+      "country": "LTU",
+      "input": "8 612 34567",
+      "expected": "+37061234567",
+      "note": "Lithuania: 8 was the trunk prefix until 1 March 2024 and is still typed from habit"
+    },
+    {
+      "country": "LTU",
+      "input": "0 612 34567",
+      "expected": "+37061234567",
+      "note": "Lithuania's trunk prefix since 1 March 2024"
+    },
+    {
+      "country": "LTU",
+      "input": "800 12345",
+      "expected": "+37080012345",
+      "note": "an 8-digit Lithuanian number that starts with 8 is a national number, kept whole"
+    },
+    {
+      "country": "TKM",
+      "input": "8 65 123456",
+      "expected": "+99365123456",
+      "note": "Turkmenistan: trunk prefix 8 before an 8-digit national number"
+    },
+    {
+      "country": "TJK",
+      "input": "8 93 123 4567",
+      "expected": "+992931234567",
+      "note": "Tajikistan: trunk prefix 8 before a 9-digit national number"
+    },
+    {
+      "country": "UZB",
+      "input": "8 90 123 45 67",
+      "expected": "+998901234567",
+      "note": "Uzbekistan: trunk prefix 8 before a 9-digit national number"
+    },
+    {
+      "country": "UZB",
+      "input": "88 123 45 67",
+      "expected": "+998881234567",
+      "note": "Uzbek mobile numbers can start with 88: a 9-digit number starting with 8 has no trunk prefix"
+    },
+    {
+      "country": "CIV",
+      "input": "07 12 34 56 78",
+      "expected": "+2250712345678",
+      "note": "Côte d'Ivoire has no trunk prefix: the regulator requires the 0 after +225"
+    },
+    {
+      "country": "CIV",
+      "input": "+225 07 12 34 56 78",
+      "expected": "+2250712345678",
+      "note": "the same Ivorian number already international keeps its 0"
+    },
+    {
+      "country": "BEN",
+      "input": "01 97 12 34 56",
+      "expected": "+2290197123456",
+      "note": "Benin: since 30 November 2024 numbers start with 01, and the 0 is dialled from abroad"
+    },
+    {
+      "country": "COG",
+      "input": "06 123 4567",
+      "expected": "+242061234567",
+      "note": "Republic of the Congo: the 0 of a 04, 05 or 06 mobile number is part of the number"
+    },
+    {
+      "country": "GAB",
+      "input": "077 12 34 56",
+      "expected": "+24177123456",
+      "note": "Gabon: since 6 April 2024 the leading 0 is a national prefix and is not dialled from abroad"
     }
   ],
   "rejected": [
@@ -238,6 +346,12 @@
       "input": "0000",
       "reason": "empty_phone_number",
       "note": "most countries strip the zeros, so the emptiness check already caught this — pinned so the reason is the same in every country"
+    },
+    {
+      "country": "CIV",
+      "input": "0000000000",
+      "reason": "empty_phone_number",
+      "note": "Côte d'Ivoire keeps its leading zeros like Italy, so a number of only zeros must be refused by rule 4, not by the emptiness check"
     }
   ],
   "countries": [
@@ -1957,5 +2071,5 @@
       "countryName": "Zimbabwe"
     }
   ],
-  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. THREE rules deliberately diverge from the Tracive app's normalizer, and they are not the same kind of thing:\n1. A dial code that disagrees with the country named is refused. Every input this rejects produced an unusable key in the app too — safe.\n2. Emptiness is re-checked AFTER the trunk prefix is stripped, so '000', '62' and '1' are refused. The app folds these to '+62' and '+1', which cannot match any record — safe, same as (1).\n3. '+00<dial>' is refused. The app DOES accept this form and folds it correctly, so here the SDKs are stricter than the app on an input the app handles. That is the intended trade: what follows '+' must be a country code, '00' is none, and admitting one malformed concatenation has no principled stopping point ('+000062', '++62').\n4. A number that is nothing but zeros is refused. Most countries' trunk rule strips the zeros and rule 2 catches it, but Italy, San Marino, North America and Russia keep leading zeros, so '+390000000' used to survive, match E.164, reach the network and be billed for a miss. The app folds it the same way, so this is a safe divergence like 1 and 2 — no number that works today folds differently."
+  "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. FOUR rules deliberately diverge from the Tracive app's normalizer, and they are not the same kind of thing:\n1. A dial code that disagrees with the country named is refused. Every input this rejects produced an unusable key in the app too — safe.\n2. Emptiness is re-checked AFTER the trunk prefix is stripped, so '000', '62' and '1' are refused. The app folds these to '+62' and '+1', which cannot match any record — safe, same as (1).\n3. '+00<dial>' is refused. The app DOES accept this form and folds it correctly, so here the SDKs are stricter than the app on an input the app handles. That is the intended trade: what follows '+' must be a country code, '00' is none, and admitting one malformed concatenation has no principled stopping point ('+000062', '++62').\n4. A number that is nothing but zeros is refused. Most countries' trunk rule strips the zeros and rule 2 catches it, but Italy, San Marino, Côte d'Ivoire, Benin, the Republic of the Congo, North America and Russia keep leading zeros, so '+390000000' used to survive, match E.164, reach the network and be billed for a miss. The app folds it the same way, so this is a safe divergence like 1 and 2 — no number that works today folds differently."
 }

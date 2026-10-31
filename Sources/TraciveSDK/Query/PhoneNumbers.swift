@@ -67,6 +67,25 @@ public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: Str
   // Italy and San Marino: the leading 0 IS part of the number for landlines.
   case "39", "378":
     break
+  // Côte d'Ivoire, Benin and the Republic of the Congo have no trunk prefix, and their regulators
+  // require the 0 after the country code (+225 07…, +229 01…, +242 06…).
+  case "225", "229", "242":
+    break
+  // Hungary: the trunk prefix is 06. A national number may start with 6 (Szeged is 62), so the pair
+  // is dropped, never a 0 and then a 6 on its own.
+  case "36":
+    if digits.hasPrefix("06") { digits = String(digits.dropFirst(2)) }
+    digits = String(digits.drop(while: { $0 == "0" }))
+  // A trunk 8 (Lithuania's until March 2024, 0 since). Some national numbers start with 8
+  // themselves (Belarusian 801 and Lithuanian 800 freephone, Uzbek 88 mobile), so the 8 goes only
+  // when exactly a national number's length follows it.
+  case "375", "370", "992", "993", "998":
+    if let afterTrunk = digitsAfterTrunk8[dialCode], digits.hasPrefix("8"),
+      digits.count == afterTrunk + 1
+    {
+      digits = String(digits.dropFirst())
+    }
+    digits = String(digits.drop(while: { $0 == "0" }))
   // North America: the trunk prefix is 1, and a local number is 10 digits.
   case "1":
     if digits.hasPrefix("1"), digits.count == 11 { digits = String(digits.dropFirst()) }
@@ -77,10 +96,10 @@ public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: Str
 
   // A number that is nothing but zeros is refused here, not left to `phone()`. For most countries the
   // trunk-prefix rule strips the zeros away and the emptiness check above catches it — but Italy, San
-  // Marino, North America and Russia do not strip leading zeros, so `+390000000` survived, matched
-  // E.164, reached the network and was billed for a miss it could only ever be. Refusing it here also
-  // makes the reason the same in every country instead of `empty_phone_number` in Indonesia and
-  // `not_e164` in Italy for the identical input.
+  // Marino, Côte d'Ivoire, Benin, the Congo, North America and Russia do not strip leading zeros, so
+  // `+390000000` survived, matched E.164, reached the network and was billed for a miss it could
+  // only ever be. Refusing it here also makes the reason the same in every country instead of
+  // `empty_phone_number` in Indonesia and `not_e164` in Italy for the identical input.
   if digits.isEmpty || digits.allSatisfy({ $0 == "0" }) {
     throw TraciveQueryError(.emptyPhoneNumber)
   }
@@ -110,6 +129,17 @@ private func resolveDialCode(_ countryOrDialCode: String) throws -> String {
   guard let country = Country.fromAlpha3(trimmed) else { throw TraciveQueryError(.unknownCountry) }
   return country.dialCode
 }
+
+/// Countries whose trunk prefix is 8, with how many digits follow that 8. Belarus counts the 0 it
+/// writes after the 8 (`8 029 123 45 67`); the leading-zero strip removes it afterwards. Source: ITU
+/// "Dialling procedures" and each country's numbering plan filed with the ITU.
+private let digitsAfterTrunk8: [String: Int] = [
+  "375": 10,  // Belarus
+  "370": 8,  // Lithuania
+  "992": 9,  // Tajikistan
+  "993": 8,  // Turkmenistan
+  "998": 9,  // Uzbekistan
+]
 
 /// The ASCII digits in `value`, per Unicode **scalar**.
 ///
