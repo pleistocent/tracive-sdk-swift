@@ -1,6 +1,6 @@
 {
   "description": "Phone-normalization contract, vendored byte-identically into the four Tracive SDK repositories. Expected values were produced by the Tracive app's PhoneUtils.normalizePhoneNumber — app and SDK must fold the same person to the same record key.",
-  "version": 8,
+  "version": 9,
   "countryCount": 245,
   "vectors": [
     {
@@ -230,6 +230,42 @@
       "input": "077 12 34 56",
       "expected": "+24177123456",
       "note": "Gabon: since 6 April 2024 the leading 0 is a national prefix and is not dialled from abroad"
+    },
+    {
+      "country": "KAZ",
+      "input": "701 234 5678",
+      "expected": "+77012345678",
+      "note": "Kazakh national numbers start with 7, the dial code's own digit: at 10 digits this is a national number, not +7 followed by 9 digits"
+    },
+    {
+      "country": "KAZ",
+      "input": "7 701 234 5678",
+      "expected": "+77012345678",
+      "note": "the same number with the country code typed but no '+': 11 digits is no national length, so the 7 is the country code"
+    },
+    {
+      "country": "NOR",
+      "input": "476 12 345",
+      "expected": "+4747612345",
+      "note": "Norway has no trunk prefix, and 8-digit numbers 47 60 00 00 to 47 68 99 99 are allocated: the leading 47 is part of the number"
+    },
+    {
+      "country": "NOR",
+      "input": "47 476 12 345",
+      "expected": "+4747612345",
+      "note": "the same Norwegian number with the country code typed but no '+'"
+    },
+    {
+      "country": "CRI",
+      "input": "5062 4585",
+      "expected": "+50650624585",
+      "note": "Costa Rican 8-digit mobile numbers in the 50YX range can start with 506, the dial code"
+    },
+    {
+      "country": "IDN",
+      "input": "62812 3456 7890",
+      "expected": "+6281234567890",
+      "note": "62 typed without '+' before an Indonesian mobile stays the country code: 13 and 11 digits are both national lengths, so the old reading is kept"
     }
   ],
   "rejected": [
@@ -2071,5 +2107,494 @@
       "countryName": "Zimbabwe"
     }
   ],
+  "nationalNumberLengths": {
+    "7": [
+      10,
+      14
+    ],
+    "20": [
+      8,
+      9,
+      10
+    ],
+    "27": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "31": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "32": [
+      8,
+      9
+    ],
+    "33": [
+      9
+    ],
+    "36": [
+      8,
+      9
+    ],
+    "39": [
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "41": [
+      9,
+      12
+    ],
+    "43": [
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "45": [
+      8
+    ],
+    "46": [
+      6,
+      7,
+      8,
+      9,
+      10,
+      12
+    ],
+    "47": [
+      5,
+      8
+    ],
+    "48": [
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "49": [
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "51": [
+      8,
+      9
+    ],
+    "53": [
+      6,
+      7,
+      8,
+      10
+    ],
+    "55": [
+      8,
+      9,
+      10,
+      11
+    ],
+    "62": [
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17
+    ],
+    "63": [
+      6,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "65": [
+      8,
+      10,
+      11
+    ],
+    "66": [
+      8,
+      9,
+      10,
+      13
+    ],
+    "84": [
+      7,
+      8,
+      9,
+      10
+    ],
+    "90": [
+      7,
+      10,
+      12,
+      13
+    ],
+    "91": [
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "92": [
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "95": [
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "213": [
+      8,
+      9
+    ],
+    "216": [
+      8
+    ],
+    "218": [
+      9
+    ],
+    "220": [
+      7,
+      9
+    ],
+    "222": [
+      8
+    ],
+    "230": [
+      7,
+      8,
+      10
+    ],
+    "231": [
+      7,
+      8,
+      9
+    ],
+    "233": [
+      8,
+      9
+    ],
+    "238": [
+      7
+    ],
+    "241": [
+      7,
+      8
+    ],
+    "243": [
+      7,
+      8,
+      9,
+      10
+    ],
+    "244": [
+      9
+    ],
+    "247": [
+      5,
+      6
+    ],
+    "250": [
+      8,
+      9
+    ],
+    "251": [
+      9
+    ],
+    "252": [
+      6,
+      7,
+      8,
+      9
+    ],
+    "255": [
+      9
+    ],
+    "262": [
+      9
+    ],
+    "266": [
+      8
+    ],
+    "267": [
+      7,
+      8,
+      10
+    ],
+    "290": [
+      4,
+      5
+    ],
+    "298": [
+      6
+    ],
+    "299": [
+      6
+    ],
+    "355": [
+      6,
+      7,
+      8,
+      9
+    ],
+    "358": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "359": [
+      6,
+      7,
+      8,
+      9,
+      12
+    ],
+    "370": [
+      8
+    ],
+    "373": [
+      8
+    ],
+    "376": [
+      6,
+      8,
+      9
+    ],
+    "377": [
+      8,
+      9
+    ],
+    "379": [
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "380": [
+      9,
+      10
+    ],
+    "383": [
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "386": [
+      5,
+      6,
+      7,
+      8
+    ],
+    "387": [
+      8,
+      9
+    ],
+    "421": [
+      6,
+      7,
+      9
+    ],
+    "500": [
+      5
+    ],
+    "501": [
+      7,
+      11
+    ],
+    "502": [
+      8,
+      11
+    ],
+    "503": [
+      7,
+      8,
+      11
+    ],
+    "506": [
+      8,
+      10
+    ],
+    "507": [
+      7,
+      8,
+      10,
+      11
+    ],
+    "508": [
+      6,
+      9
+    ],
+    "590": [
+      9
+    ],
+    "594": [
+      9
+    ],
+    "596": [
+      9
+    ],
+    "677": [
+      5,
+      7
+    ],
+    "679": [
+      7,
+      11
+    ],
+    "680": [
+      7
+    ],
+    "683": [
+      4,
+      7
+    ],
+    "685": [
+      5,
+      6,
+      7,
+      10
+    ],
+    "850": [
+      8,
+      10
+    ],
+    "853": [
+      7,
+      8
+    ],
+    "855": [
+      8,
+      9,
+      10
+    ],
+    "886": [
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "960": [
+      7,
+      10
+    ],
+    "961": [
+      7,
+      8
+    ],
+    "962": [
+      8,
+      9
+    ],
+    "963": [
+      8,
+      9
+    ],
+    "965": [
+      7,
+      8
+    ],
+    "968": [
+      7,
+      8,
+      9
+    ],
+    "971": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "972": [
+      7,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "973": [
+      8
+    ],
+    "976": [
+      8,
+      9,
+      10
+    ],
+    "992": [
+      9
+    ],
+    "994": [
+      9
+    ],
+    "996": [
+      9,
+      10
+    ],
+    "998": [
+      9
+    ]
+  },
+  "nationalNumberLengthsNote": "For the dial codes whose national numbers can start with the dial code's own digits: every length a national number can have (libphonenumber 9.0.42 metadata, all number types). A number typed without '+' that starts with its dial code keeps those digits only when its length is listed and its length without the dial code is not. With '+', or when both lengths are listed (Indonesia, Italy), the dial code is stripped as before, so a number typed with its country code never changes key.",
   "contract": "A '+' in the input is the caller stating the number is already international, and the digits that follow it must be the country code. FOUR rules deliberately diverge from the Tracive app's normalizer, and they are not the same kind of thing:\n1. A dial code that disagrees with the country named is refused. Every input this rejects produced an unusable key in the app too — safe.\n2. Emptiness is re-checked AFTER the trunk prefix is stripped, so '000', '62' and '1' are refused. The app folds these to '+62' and '+1', which cannot match any record — safe, same as (1).\n3. '+00<dial>' is refused. The app DOES accept this form and folds it correctly, so here the SDKs are stricter than the app on an input the app handles. That is the intended trade: what follows '+' must be a country code, '00' is none, and admitting one malformed concatenation has no principled stopping point ('+000062', '++62').\n4. A number that is nothing but zeros is refused. Most countries' trunk rule strips the zeros and rule 2 catches it, but Italy, San Marino, Côte d'Ivoire, Benin, the Republic of the Congo, North America and Russia keep leading zeros, so '+390000000' used to survive, match E.164, reach the network and be billed for a miss. The app folds it the same way, so this is a safe divergence like 1 and 2 — no number that works today folds differently."
 }

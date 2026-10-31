@@ -48,15 +48,16 @@ public func normalizePhoneNumber(_ countryOrDialCode: String, _ phoneNumber: Str
   // A third, quieter one: emptiness is re-checked *after* the trunk prefix is stripped, so `000`,
   // `62` and `1` are refused. The app folds those to `+62` and `+1`, which cannot match any record,
   // so this belongs with the first kind — safe, not stricter.
-  if trimmedCanonically(phoneNumber).hasPrefix("+"),
-    !digits.hasPrefix(dialCode)
-  {
+  let international = trimmedCanonically(phoneNumber).hasPrefix("+")
+  if international, !digits.hasPrefix(dialCode) {
     throw TraciveQueryError(.countryConflict)
   }
 
   if digits.hasPrefix("00" + dialCode) {
     digits = String(digits.dropFirst(2 + dialCode.count))
-  } else if digits.hasPrefix(dialCode) {
+  } else if digits.hasPrefix(dialCode), international || !isNationalNumber(dialCode, digits) {
+    // Without a `+`, digits that are a national number merely starting with the dial code's own
+    // digits keep them (Kazakh 701…).
     digits = String(digits.dropFirst(dialCode.count))
   }
 
@@ -128,6 +129,117 @@ private func resolveDialCode(_ countryOrDialCode: String) throws -> String {
 
   guard let country = Country.fromAlpha3(trimmed) else { throw TraciveQueryError(.unknownCountry) }
   return country.dialCode
+}
+
+/// Every length a national number can have, for the dial codes whose national numbers can start
+/// with the dial code's own digits (libphonenumber 9.0.42 metadata, all number types). The same
+/// table as `nationalNumberLengths` in `phone-normalization-vectors.json`, which the tests sweep.
+private let nationalNumberLengths: [String: Set<Int>] = [
+  "7": [10, 14],
+  "20": [8, 9, 10],
+  "27": [5, 6, 7, 8, 9, 10],
+  "31": [5, 6, 7, 8, 9, 10, 11],
+  "32": [8, 9],
+  "33": [9],
+  "36": [8, 9],
+  "39": [6, 7, 8, 9, 10, 11, 12],
+  "41": [9, 12],
+  "43": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+  "45": [8],
+  "46": [6, 7, 8, 9, 10, 12],
+  "47": [5, 8],
+  "48": [6, 7, 8, 9, 10],
+  "49": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  "51": [8, 9],
+  "53": [6, 7, 8, 10],
+  "55": [8, 9, 10, 11],
+  "62": [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+  "63": [6, 8, 9, 10, 11, 12, 13],
+  "65": [8, 10, 11],
+  "66": [8, 9, 10, 13],
+  "84": [7, 8, 9, 10],
+  "90": [7, 10, 12, 13],
+  "91": [8, 9, 10, 11, 12, 13],
+  "92": [8, 9, 10, 11, 12],
+  "95": [6, 7, 8, 9, 10],
+  "213": [8, 9],
+  "216": [8],
+  "218": [9],
+  "220": [7, 9],
+  "222": [8],
+  "230": [7, 8, 10],
+  "231": [7, 8, 9],
+  "233": [8, 9],
+  "238": [7],
+  "241": [7, 8],
+  "243": [7, 8, 9, 10],
+  "244": [9],
+  "247": [5, 6],
+  "250": [8, 9],
+  "251": [9],
+  "252": [6, 7, 8, 9],
+  "255": [9],
+  "262": [9],
+  "266": [8],
+  "267": [7, 8, 10],
+  "290": [4, 5],
+  "298": [6],
+  "299": [6],
+  "355": [6, 7, 8, 9],
+  "358": [5, 6, 7, 8, 9, 10, 11, 12],
+  "359": [6, 7, 8, 9, 12],
+  "370": [8],
+  "373": [8],
+  "376": [6, 8, 9],
+  "377": [8, 9],
+  "379": [6, 7, 8, 9, 10, 11, 12],
+  "380": [9, 10],
+  "383": [8, 9, 10, 11, 12],
+  "386": [5, 6, 7, 8],
+  "387": [8, 9],
+  "421": [6, 7, 9],
+  "500": [5],
+  "501": [7, 11],
+  "502": [8, 11],
+  "503": [7, 8, 11],
+  "506": [8, 10],
+  "507": [7, 8, 10, 11],
+  "508": [6, 9],
+  "590": [9],
+  "594": [9],
+  "596": [9],
+  "677": [5, 7],
+  "679": [7, 11],
+  "680": [7],
+  "683": [4, 7],
+  "685": [5, 6, 7, 10],
+  "850": [8, 10],
+  "853": [7, 8],
+  "855": [8, 9, 10],
+  "886": [7, 8, 9, 10, 11],
+  "960": [7, 10],
+  "961": [7, 8],
+  "962": [8, 9],
+  "963": [8, 9],
+  "965": [7, 8],
+  "968": [7, 8, 9],
+  "971": [5, 6, 7, 8, 9, 10, 11, 12],
+  "972": [7, 8, 9, 10, 11, 12],
+  "973": [8],
+  "976": [8, 9, 10],
+  "992": [9],
+  "994": [9],
+  "996": [9, 10],
+  "998": [9],
+]
+
+/// Digits that start with `dialCode` are a national number when their length is a national length
+/// and their length without the dial code is not. When both are (Indonesia's `62812…`, Italy's
+/// `393…`), the dial code is stripped as before, so a number typed with its country code never
+/// changes key.
+private func isNationalNumber(_ dialCode: String, _ digits: String) -> Bool {
+  guard let lengths = nationalNumberLengths[dialCode] else { return false }
+  return lengths.contains(digits.count) && !lengths.contains(digits.count - dialCode.count)
 }
 
 /// Countries whose trunk prefix is 8, with how many digits follow that 8. Belarus counts the 0 it

@@ -28,6 +28,7 @@ final class PhoneNormalizationTests: XCTestCase {
     let vectors: [Vector]
     let rejected: [Rejection]
     let countries: [CountryRow]
+    let nationalNumberLengths: [String: [Int]]
   }
 
   private func loadFixture() throws -> Fixture {
@@ -58,6 +59,25 @@ final class PhoneNormalizationTests: XCTestCase {
         "accepted an unusable input: \(rejection.country) / \(rejection.input)"
       ) { error in
         XCTAssertEqual((error as? TraciveQueryError)?.reason.rawValue, rejection.reason)
+      }
+    }
+  }
+
+  /// Every dial code and every length up to 17: a number typed without `+` that starts with its own
+  /// dial code keeps those digits only as the fixture's `nationalNumberLengths` says. The 5s keep
+  /// trunk rules out of it.
+  func testANumberStartingWithItsDialCodeIsReadByTheLengthsTable() throws {
+    let fixture = try loadFixture()
+    XCTAssertFalse(fixture.nationalNumberLengths.isEmpty)
+    let dialCodes = Set(fixture.countries.map(\.dialCode)).subtracting(["1"])
+    for dialCode in dialCodes {
+      let national = fixture.nationalNumberLengths[dialCode] ?? []
+      for length in (dialCode.count + 1)...17 {
+        let rest = String(repeating: "5", count: length - dialCode.count)
+        let typed = dialCode + rest
+        let keep = national.contains(length) && !national.contains(length - dialCode.count)
+        XCTAssertEqual(
+          try normalizePhoneNumber(dialCode, typed), "+" + dialCode + (keep ? typed : rest), typed)
       }
     }
   }

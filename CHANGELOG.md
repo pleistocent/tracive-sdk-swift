@@ -192,6 +192,17 @@ source compatibility until the API freezes at 1.0.
 
 ### Fixed
 
+- **A national number that starts with its own dial code's digits keeps them.** Every Kazakh
+  number starts with 7, so `normalizePhoneNumber("KAZ", "701 234 5678")` gave `+7012345678` while
+  `"+7 701 234 5678"` gave `+77012345678`. The same hit closed numbering plans where the bare number
+  is how people write it: Norway (`476 12 345`), Costa Rica (`5062 4585`), Singapore and 90-odd
+  others. Without a `+`, digits that start with the dial code now keep it when their length is a
+  national-number length and their length without the dial code is not. The lengths, per dial
+  code, come from libphonenumber 9.0.42 and ship in the fixture as `nationalNumberLengths`. A number
+  typed with `+`, or where both readings are possible (Indonesia's `62812…`, Italy's `393…`), is
+  stripped as before, so no number typed with its country code changes key. The phone fixture moves
+  to v9 with 6 new vectors and the table; a new test sweeps every dial code and length against it.
+
 - **`normalizePhoneNumber` now folds a number typed the local way to the same key as its
   `+<code>` form in eight more countries.** Hungary's trunk prefix is `06`, so `06 30 123 4567` gave
   `+366301234567` while `+36 30 123 4567` gave `+36301234567`: one person, two record keys. The
