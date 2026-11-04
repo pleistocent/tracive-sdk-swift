@@ -74,6 +74,9 @@ const ALLOWED_PLEISTOCENT_PATTERNS = [
   // The copyright holder in a licence header. Legitimate, and the reason widening this scan to
   // extension-less files surfaced LICENSE on the first run.
   /Copyright \d{4} (?:PT )?Pleistocent(?:[A-Za-z ]*)?(?![A-Za-z0-9._-])/g,
+  // The maintainer contact SECURITY.md names. This one address only: the bare domain and any other
+  // mailbox on it still fail.
+  /developer@pleistocent\.com(?![A-Za-z0-9_-]|\.[A-Za-z0-9])/g,
   /com\.pleistocent\.tracive(?:\.[A-Za-z0-9_]+)*(?![A-Za-z0-9._-])/g,
   /github\.com\/pleistocent\/tracive-sdk-swift(\.git)?(?![A-Za-z0-9._-])/g,
   /pleistocent\/tracive-sdk-swift(?![A-Za-z0-9._-])/g,
