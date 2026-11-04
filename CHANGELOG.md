@@ -7,6 +7,15 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-11-04
+
+First public release, through Swift Package Manager from this repository's `0.1.0` tag. phase 1:
+OAuth mode only, against the live Tracive Open API.
+
+The 2026-07-31 entry below was a snapshot that was never published. This release is that snapshot
+plus everything listed here, so the **Breaking** items are changes from the snapshot, not from
+anything anyone could have installed.
+
 ### Added
 - **A bank account can be named by its national bank code or its BIC.**
   `bankAccount(countryAlpha3:bankShortCode:account:)` and `bankAccount(countryAlpha3:bic:account:)`
@@ -874,7 +883,7 @@ source compatibility until the API freezes at 1.0.
   was previously only asserted in prose.
 - Removed every citation to internal-only material, along with an unused `Darwin` import.
 
-## [0.1.0] — 2026-07-31
+## 2026-07-31 snapshot (never published)
 
 First release. **The Tracive Open API is not deployed**: this package implements the frozen contract
 and is fully unit-tested offline, but no request in it has ever reached a live server. Integrate and
