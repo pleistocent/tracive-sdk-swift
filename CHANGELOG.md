@@ -7,6 +7,45 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-05
+
+### Added
+- **`openReportForm` opens the Tracive app's report form with the scammer's account, the
+  transaction date and the receipt already filled in.** One call on the `TraciveClient` you already
+  hold, from a transaction detail screen:
+
+  ```swift
+  let result = await client.openReportForm(
+    query,
+    incidentDate: ReportIncidentDate(transaction.date),
+    attachments: [.image(receiptPNG, mimeType: "image/png"), .pdf(receiptPDF)],
+    from: .view(reportButton)
+  )
+  ```
+
+  It needs no `authorize()`, no token, no network and no credit, so it works for `.confidential`
+  clients too. Nothing leaves the phone until the user submits the report inside Tracive. iOS shows
+  its "Open in" sheet (a popover on iPad, pointing at the anchor), and the result says what the user
+  did: `.opened(attachmentsDelivered: true)` when they picked Tracive, `.cancelled` for anything
+  else, `.opened(attachmentsDelivered: false)` when an older Tracive app got the account through a
+  link instead, and `.installPageOpened` when Tracive is missing.
+
+  Attachments are checked before anything opens, with the Tracive app's own limits: JPEG, PNG,
+  WebP, HEIC, HEIF, BMP or PDF whose bytes match the declared type, at most 5 (10 for a phone
+  number), each PDF under 1 MiB, and 20 MiB for the encoded package. A date after the device's
+  local today is refused too. Each failure is a `ReportFormError` case carrying the index or the
+  limit, and opens nothing. `error.code` is the spelling shared with the other Tracive SDKs
+  (`PDF_TOO_LARGE`, …), with `PLATFORM_FAILURE` for `.platform(reason:)`, when iOS refused a step.
+
+  New types: `ReportAttachment`, `ReportIncidentDate` (a calendar date, written `YYYY-MM-DD`),
+  `ReportFormResult`, `ReportFormError`, `ReportFormAnchor` and `ReportFormTarget`. The package
+  format is pinned by `Tests/TraciveSDKTests/Fixtures/report-package-vectors.json`, shared byte for
+  byte with the Kotlin, Flutter and React Native SDKs.
+- **Two more `LSApplicationQueriesSchemes` entries: `tracive-report` and
+  `tracivesandbox-report`.** Only Tracive versions that accept a report package register them.
+  Without them `openReportForm` still works but always takes the identifier-only link, so the
+  receipt never arrives. See `Docs/integration.md`.
+
 ## [0.1.0] — 2026-11-04
 
 First public release, through Swift Package Manager from this repository's `0.1.0` tag. phase 1:
@@ -965,5 +1004,6 @@ ship the wiring now; expect real verdicts when the backend lands.
   row with CryptoKit instead of encrypting the database file.
 - iOS 15+ / macOS 12+.
 
-[Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.0
 [0.1.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.1.0
