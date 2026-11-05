@@ -49,11 +49,20 @@
     Both entries because the probe follows `environment`: `tracive` is the production app,
     `tracivesandbox` the sandbox build — the sandbox and production flavors use one each. See
     Docs/integration.md.
+
+    The `-report` schemes are what openReportForm probes for: only Tracive versions that accept a
+    report package register them, and without them every report goes out as the identifier-only
+    link. The `tracivedev` pair is not something a partner app needs; it is here because the
+    Report tab's picker can aim at Tracive's internal dev build for QA.
   -->
   <key>LSApplicationQueriesSchemes</key>
   <array>
     <string>tracive</string>
     <string>tracivesandbox</string>
+    <string>tracivedev</string>
+    <string>tracive-report</string>
+    <string>tracivesandbox-report</string>
+    <string>tracivedev-report</string>
   </array>
 
   <!--

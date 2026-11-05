@@ -12,7 +12,7 @@ How to wire the Tracive SDK into an iOS app, end to end.
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.1.0")
+.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.0")
 ```
 
 In Xcode: **File → Add Package Dependencies…**, then add `TraciveSDK` to your app target.
@@ -31,10 +31,15 @@ step and every user looks like they do not have the app installed.
 <array>
   <string>tracive</string>
   <string>tracivesandbox</string>
+  <string>tracive-report</string>
+  <string>tracivesandbox-report</string>
 </array>
 ```
 
-Both schemes, not just the first. `TraciveAppPresence.scheme(for:)` follows the environment: against
+The last two are for `openReportForm` ([section 10](#10-report-a-scammer)); list them even if you
+do not use it yet, so adding it later is not also an `Info.plist` change.
+
+Both environments, not just production. `TraciveAppPresence.scheme(for:)` follows the environment: against
 `.sandbox` it probes `tracivesandbox://`, and an app that lists only `tracive` gets `false` from
 `canOpenURL` for a sandbox build that is installed — which routes a tester to an install page for an
 app they are holding.
@@ -357,6 +362,86 @@ search history, and a failure to clear them is silent and lands on whoever picks
 If you specifically want a warm cache to survive a re-login on a single-user device, call
 `await tracive.oauth?.signOut()` instead — that drops the grant and nothing else.
 
+## 10. Report a scammer
+
+On a transaction detail screen, a "Report" button can open the Tracive app's report form with the
+recipient's account, the transaction date and the receipt already filled in. No consent, no token,
+no network and no credit are involved, so this works before `authorize()` and for `.confidential`
+clients.
+
+```swift
+@IBAction func reportTapped(_ sender: UIButton) {
+  Task {
+    sender.isEnabled = false
+    defer { sender.isEnabled = true }
+
+    let query: TraciveQuery
+    do {
+      query = try .bankAccount(countryAlpha3: "IDN", bankCode: transfer.bankCode, account: transfer.account)
+    } catch {
+      return showMessage("This account cannot be reported.")
+    }
+
+    let result = await tracive.openReportForm(
+      query,
+      incidentDate: ReportIncidentDate(transfer.completedAt),
+      attachments: [.image(transfer.receiptImage, mimeType: "image/png")],
+      from: .view(sender)
+    )
+    handle(result)
+  }
+}
+
+func handle(_ result: ReportFormResult) {
+  switch result {
+  case .opened(attachmentsDelivered: true):
+    break
+  case .opened(attachmentsDelivered: false):
+    // An older Tracive app, or `tracive-report` missing from LSApplicationQueriesSchemes:
+    // the form opened with the account only.
+    showMessage("Tracive opened. Please attach the receipt there.")
+  case .cancelled:
+    break
+  case .installPageOpened:
+    showMessage("Install Tracive, then tap Report again.")
+  case .failed(let error):
+    showMessage(error.localizedDescription)
+  }
+}
+```
+
+In SwiftUI there is no `UIView` to anchor to; pass `.keyWindow` and the sheet is presented from the
+key window's top view controller (on iPad, as a popover pointing at its centre).
+
+What happens, in order:
+
+1. **Validation.** Types (JPEG, PNG, WebP, HEIC, HEIF, BMP, PDF; never GIF), bytes matching the
+   declared type, at most 5 attachments (10 for a phone number), each PDF under 1 MiB, the encoded
+   package at most 20 MiB, and a date no later than the device's local today. A failure answers
+   `.failed(ReportFormError)` and opens nothing. `error.code` is the spelling all four Tracive SDKs
+   share (`PDF_TOO_LARGE`, …, and `PLATFORM_FAILURE` when iOS refused a step); the index, the
+   limit or the reason rides on the case.
+2. **A Tracive app that accepts packages** (it answers `canOpenURL("tracive-report://")`): the SDK
+   writes the package to its temporary directory and shows iOS's "Open in" sheet. The call waits for
+   the user. Picking the Tracive app answers `.opened(attachmentsDelivered: true)`. Closing the
+   sheet, "Save to Files" or any other app answers `.cancelled`; another app can claim the same file
+   type, so the SDK checks which app the user actually picked. On iPad, rotating the device closes
+   the sheet too, and the call answers `.cancelled` about a second later.
+3. **An older Tracive app** (only `tracive://` answers): the SDK opens
+   `tracive://report/create?media=…` and iOS asks the user to confirm.
+   `.opened(attachmentsDelivered: false)`, or `.cancelled` if they decline.
+4. **No Tracive app**: the install page, exactly as `authorize()` opens it, carrying nothing from the
+   report. `.installPageOpened`.
+
+Only one report can be on screen at a time: a call made while another is still waiting on the sheet
+answers `.failed(.platform(reason: "already_in_progress"))`. Disable the button while the call is
+running, as above.
+
+The build follows the client's `environment`: production (and `.custom`) hand over to the production
+app, sandbox to the sandbox app. Each claims its own file type, so a sandbox report never opens the
+production form on a device that has both. `target:` overrides that, and is only for testing against
+a build the SDK does not know about.
+
 ---
 
 ## Testing your integration
@@ -419,7 +504,8 @@ If you build queries from user input, test the folding: `+62 812-3456-7891`, `+6
 
 ## Checklist before you ship
 
-- [ ] `LSApplicationQueriesSchemes` contains `tracive` **and** `tracivesandbox`
+- [ ] `LSApplicationQueriesSchemes` contains `tracive` **and** `tracivesandbox`, plus
+      `tracive-report` and `tracivesandbox-report` if you call `openReportForm`
 - [ ] Redirect URI is a Universal Link with a live `apple-app-site-association`, and matches what is
       registered with Tracive **exactly**
 - [ ] The consent flow does not go through a `WKWebView` anywhere

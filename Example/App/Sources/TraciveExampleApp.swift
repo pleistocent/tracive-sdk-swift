@@ -12,13 +12,37 @@ struct TraciveExampleApp: App {
 
   var body: some Scene {
     WindowGroup {
-      if let client = Self.liveClient, let environment = ExampleFlavor.current.environment {
-        LiveCheckScreen(client: client, environment: environment)
-      } else {
-        ScammerCheckView(checker: Self.demoChecker, isOfflineDemo: true)
+      TabView {
+        checkScreen
+          .tabItem { Label("Check", systemImage: "checkmark.shield") }
+        ReportScammerView(opener: LiveReportFormOpener(client: Self.reportClient))
+          .tabItem { Label("Report", systemImage: "exclamationmark.bubble") }
       }
     }
   }
+
+  @ViewBuilder
+  private var checkScreen: some View {
+    if let client = Self.liveClient, let environment = ExampleFlavor.current.environment {
+      LiveCheckScreen(client: client, environment: environment)
+    } else {
+      ScammerCheckView(checker: Self.demoChecker, isOfflineDemo: true)
+    }
+  }
+
+  /// `openReportForm` needs no grant, no network and no credit, so even the offline demo can call
+  /// it for real. The demo's client exists only for that: it never authorizes and caches nothing.
+  private static let reportClient: TraciveClient =
+    liveClient
+    ?? TraciveClient(
+      mode: .oauth(
+        clientId: ExampleFlavor.current.clientId,
+        redirectUri: ExampleFlavor.current.redirectUri,
+        partnerUserId: "partner-user-1"
+      ),
+      environment: .sandbox,
+      cache: NoOpCheckCache()
+    )
 
   /// Built once, like the demo checker below. The initialiser opens the on-disk cache synchronously,
   /// which is acceptable for an example; see `TraciveClient.init` if it is not for your launch.
@@ -65,6 +89,22 @@ struct TraciveExampleApp: App {
       print("[TraciveExample] on-disk cache unavailable — caching is off for this run: \(error)")
       return NoOpCheckCache()
     }
+  }
+}
+
+/// `openReportForm`, from SwiftUI: there is no `UIView` to anchor the sheet to, so it is presented
+/// from the key window's top view controller.
+struct LiveReportFormOpener: ReportFormOpening {
+  let client: TraciveClient
+  @MainActor
+  func open(
+    _ query: TraciveQuery,
+    incidentDate: ReportIncidentDate?,
+    attachments: [ReportAttachment],
+    target: ReportFormTarget?
+  ) async -> ReportFormResult {
+    await client.openReportForm(
+      query, incidentDate: incidentDate, attachments: attachments, target: target, from: .keyWindow)
   }
 }
 

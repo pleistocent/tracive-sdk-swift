@@ -143,6 +143,13 @@ jobs:
         # A red step here is not re-pinned to make it green. A change lands in all four SDKs together.
         run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/phone-normalization-vectors.sha256
 
+      - name: Verify the report-package fixture is unmodified
+        # Same mechanism again. `report-package-vectors.json` is the format of the file
+        # `openReportForm` hands to the Tracive app, shared byte for byte with the other three SDKs;
+        # the Kotlin repository's copy is canonical. `testTheFixtureMatchesItsPinnedContentHash` in
+        # `ReportPackageVectorTests` reads the same sidecar.
+        run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/report-package-vectors.sha256
+
       - name: Build
         run: swift build -v
 

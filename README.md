@@ -4,7 +4,7 @@ Scammer lookup for iOS apps — check a phone number, email, bank account, IBAN,
 social handle against Tracive's community fraud index, with a local encrypted cache so the same
 identifier is not billed twice.
 
-**Version 0.1.0 · iOS 15+ / macOS 12+ · Apache-2.0**
+**Version 0.2.0 · iOS 15+ / macOS 12+ · Apache-2.0**
 
 ---
 
@@ -82,7 +82,7 @@ of encrypting the database file — same protection for the data that matters, n
 Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.1.0")
+.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.0")
 ```
 
 then add `TraciveSDK` to your target's dependencies. In Xcode: **File → Add Package Dependencies…**
@@ -294,6 +294,84 @@ drifts in one language fails its own build rather than quietly building keys tha
 
 ---
 
+## Report a scammer
+
+From a transaction detail screen, one call opens the Tracive app's report form with the scammer's
+account, the transaction date and the receipt already filled in. It needs no `authorize()`, no
+token, no network and no credit, so it works for a `.confidential` client too. Nothing leaves the
+phone until the user submits the report inside Tracive.
+
+```swift
+let query = try TraciveQuery.bankAccount(countryAlpha3: "IDN", bankCode: "BCA", account: "1234567890")
+
+let result = await client.openReportForm(
+  query,
+  incidentDate: ReportIncidentDate(transaction.date),   // the device's local day of that instant
+  attachments: [
+    .image(receiptPNG, mimeType: "image/png"),
+    .pdf(receiptPDF),
+  ],
+  from: .view(reportButton)    // SwiftUI, or no view to hand: .keyWindow
+)
+
+switch result {
+case .opened(attachmentsDelivered: true):
+  break                        // the whole report reached Tracive
+case .opened(attachmentsDelivered: false):
+  showMessage("Tracive opened. Please attach the receipt there.")
+case .cancelled:
+  break                        // the user closed the sheet or picked another app
+case .installPageOpened:
+  showMessage("Install Tracive, then tap Report again.")
+case .failed(let error):
+  showMessage(error.localizedDescription)    // error.code: INCIDENT_DATE_IN_FUTURE, PDF_TOO_LARGE, …
+}
+```
+
+On a device with a current Tracive app, iOS shows its "Open in" sheet (a popover on iPad, pointing at
+the anchor) and the call returns once the user picks. Picking Tracive is the only choice that answers
+`.opened(attachmentsDelivered: true)`. An older Tracive app gets the identifier through a link,
+after iOS asks the user to confirm. With no Tracive app the SDK opens the install page, which carries
+nothing from the report.
+
+**Add both report schemes to `LSApplicationQueriesSchemes`**, next to the two you already have:
+
+```xml
+<key>LSApplicationQueriesSchemes</key>
+<array>
+  <string>tracive</string>
+  <string>tracivesandbox</string>
+  <string>tracive-report</string>
+  <string>tracivesandbox-report</string>
+</array>
+```
+
+Only app versions that accept a report package register `tracive-report`. If your `Info.plist` lacks
+it, `canOpenURL` answers `false` and every user gets the identifier-only link instead of the package:
+nothing breaks, but the receipt never arrives. Sandbox and production each have their own build,
+scheme and file type, so a sandbox client hands reports only to the sandbox app.
+
+Limits, checked before anything opens (the Tracive app checks them again):
+
+| | |
+|---|---|
+| Types | JPEG, PNG, WebP, HEIC, HEIF, BMP, PDF. GIF is refused. The bytes must match the declared type |
+| Count | 5, or 10 when the query is a phone number |
+| PDF size | under 1 MiB (1,048,576 bytes) |
+| Whole package | 20 MiB once encoded, roughly 15 MB of files |
+| Date | not after the device's local today |
+
+`ReportIncidentDate` is a calendar date with no time zone: build it from a `Date` (the device's local
+day), from `year:month:day:`, or from a `YYYY-MM-DD` string. Only the last two can fail, and they
+return `nil` rather than an invalid date.
+
+To try it against a Tracive build the SDK does not know about, such as an internal QA build, pass
+`target: ReportFormTarget(bundleIdentifier:scheme:capabilityScheme:fileExtension:)` and list that
+build's two schemes in `LSApplicationQueriesSchemes` too. Leave it out in production code: the
+client's `environment` picks the build.
+
+---
+
 ## Caching
 
 On by default. A cache hit costs **zero credits and does no network I/O**.
@@ -458,9 +536,11 @@ release still reaches you intact.
 - Cached payloads are encrypted with AES-GCM under a key held in the Keychain, Secure Enclave-backed
   where the device has one, and marked `ThisDeviceOnly` so it never travels in a backup.
 - Tokens live in the Keychain — never `UserDefaults`, never a plist, never a file.
-- `TraciveQuery`, `CheckCacheKey`, `ProxyConfiguration` and `TraciveQueryError` all redact themselves
-  in `description`, so a stray `print`, `os_log` interpolation or crash report cannot leak an
-  identifier or a bearer token.
+- `TraciveQuery`, `CheckCacheKey`, `ProxyConfiguration`, `TraciveQueryError` and `ReportAttachment`
+  all redact themselves in `description`, so a stray `print`, `os_log` interpolation or crash report
+  cannot leak an identifier, a receipt or a bearer token.
+- `openReportForm` writes its package (identifier, date, receipts) to the app's temporary directory
+  for the "Open in" sheet, and deletes it at the start of the next call. It logs nothing.
 - **`signOut()` clears the cache too.** It revokes the grant, drops the tokens, and empties the
   encrypted result store. Those rows were fetched under the departing user's grant and are keyed by
   `SHA-256` of a phone number or an email address — a small enough search space to brute-force

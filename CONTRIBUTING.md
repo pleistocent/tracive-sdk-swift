@@ -84,6 +84,10 @@ by reformatting the fixture from 21 662 bytes to 32 533 and watching all 259 tes
 If the pin goes red, the fixture moved. Re-pinning is the wrong repair unless the new bytes came
 from upstream and are landing in the other three repositories in the same breath.
 
+The same holds for `report-package-vectors.json`, the format of the package `openReportForm` hands
+to the Tracive app. It is pinned by `report-package-vectors.sha256` and driven by
+`ReportPackageVectorTests`; the Kotlin SDK's copy is the canonical one.
+
 ### And nothing may sit between a fixture value and the assertion that reads it
 
 Pinning the file is only half of it. The pin proves the *bytes* did not move; it says nothing about

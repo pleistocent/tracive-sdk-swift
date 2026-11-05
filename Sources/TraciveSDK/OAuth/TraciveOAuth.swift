@@ -65,7 +65,7 @@ public actor TraciveOAuth {
 
   private let transport: any HTTPTransport
   private let tokenStore: any TraciveTokenStore
-  private let appLauncher: any TraciveAppLauncher
+  let appLauncher: any TraciveAppLauncher
   private let pkceGenerator: any PKCEGenerating
   private let clock: any TraciveClock
 

@@ -73,7 +73,7 @@ public actor TraciveClient {
   public nonisolated let oauth: TraciveOAuth?
 
   private let transport: any HTTPTransport
-  private let clock: any TraciveClock
+  let clock: any TraciveClock
   /// The checks currently on the wire, keyed on the record key plus the detail level, the locale
   /// and the caller's own idempotency key when there is one. This one map *is* the single-flight
   /// guarantee for billable checks; `latchedFetch` says what it covers and what it deliberately

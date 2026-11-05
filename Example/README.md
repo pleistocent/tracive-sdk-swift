@@ -1,6 +1,6 @@
 # TraciveExample
 
-A one-screen SwiftUI demonstration of the Tracive SDK.
+A two-tab SwiftUI demonstration of the Tracive SDK: a scammer check, and reporting a scammer.
 
 ```bash
 cd Example
@@ -20,6 +20,9 @@ cannot rot silently.
 - Provenance in the UI: a cached answer says so, and says how old it is.
 - Every `TraciveError` mapped to something a user can act on — including the 402, handled by catching
   it rather than by calling `credits()` first.
+- A **Report** tab: a mock transaction detail whose button calls `openReportForm` with the
+  recipient's bank account, yesterday's date and a receipt generated in code (one PNG, one PDF). See
+  [Reporting a scammer](#reporting-a-scammer).
 
 ## It runs entirely offline
 
@@ -119,6 +122,31 @@ without installing anything. Change the spec, not the `.pbxproj`:
 brew install xcodegen && cd App && xcodegen generate
 ```
 
+### Reporting a scammer
+
+The **Report** tab works in every flavor, the demo included: `openReportForm` needs no sign-in, no
+network and no credit, so there is nothing to stub. The screen depends on `ReportFormOpening`; the
+app's `LiveReportFormOpener` is the one-line call, anchored with `.keyWindow` because SwiftUI has no
+`UIView` to hand.
+
+The segmented picker chooses which Tracive build receives the report, and defaults to **Sandbox**:
+
+| Picker | Hands over to | Schemes probed |
+|---|---|---|
+| Sandbox | `com.pleistocent.tracive.sandbox` | `tracivesandbox-report`, then `tracivesandbox` |
+| Production | `com.pleistocent.tracive` | `tracive-report`, then `tracive` |
+| Dev build (QA) | `com.pleistocent.tracive.dev` | `tracivedev-report`, then `tracivedev` |
+
+The picker passes an explicit `target:`. A real integration leaves it out and lets the client's
+`environment` decide; the dev build is Tracive's internal QA build and is reachable only this way.
+
+To try it against the sandbox app: install the Tracive sandbox build on the simulator, run any
+scheme, open **Report**, keep **Sandbox** and tap **Report this account**. Pick the Tracive icon in
+the sheet, and the screen reads "Opened in Tracive with the account, the date and both receipts".
+Choose **Dev build (QA)** instead to hand the report to a locally built dev app. A Tracive build
+that predates report packages gets the account only, through a link; with no Tracive build at all,
+the install page opens.
+
 ### What the app exercises that `swift build` cannot
 
 `ScammerCheckView()` builds its own in-memory cache with an ephemeral key, which is right for a
@@ -132,6 +160,7 @@ a `ScammerChecking`, so pointing this screen at a live environment is one type, 
 UI. The demo stays the stub: an example that needs credentials and a reachable host is one nobody can
 run on a fresh clone.
 
-For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive` and
-`tracivesandbox` (the app's `Info.plist` has both) and a Universal Link redirect URI — see
+For a real integration you also need `LSApplicationQueriesSchemes` containing `tracive`,
+`tracivesandbox`, `tracive-report` and `tracivesandbox-report` (the app's `Info.plist` has those,
+plus the dev build's pair for the Report tab's QA option) and a Universal Link redirect URI — see
 [`../Docs/integration.md`](../Docs/integration.md).
