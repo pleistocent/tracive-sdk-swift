@@ -49,6 +49,9 @@ import Foundation
     ///     against a build the SDK does not know about.
     ///   - anchor: where the sheet's popover points on iPad. `.keyWindow` when there is no view to
     ///     hand, as in SwiftUI.
+    ///
+    /// To let the user report without leaving your app, use `tracive-sdk-extended`. This call hands
+    /// the report to the Tracive app.
     @MainActor
     public func openReportForm(
       _ query: TraciveQuery,

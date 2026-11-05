@@ -4,7 +4,7 @@ Scammer lookup for iOS apps — check a phone number, email, bank account, IBAN,
 social handle against Tracive's community fraud index, with a local encrypted cache so the same
 identifier is not billed twice.
 
-**Version 0.2.0 · iOS 15+ / macOS 12+ · Apache-2.0**
+**Version 0.2.1 · iOS 15+ / macOS 12+ · Apache-2.0**
 
 ---
 
@@ -82,7 +82,7 @@ of encrypting the database file — same protection for the data that matters, n
 Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.0")
+.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.1")
 ```
 
 then add `TraciveSDK` to your target's dependencies. In Xcode: **File → Add Package Dependencies…**

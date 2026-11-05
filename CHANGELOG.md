@@ -7,6 +7,11 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-11-07
+
+### Documentation
+- `openReportForm` points at `tracive-sdk-extended` for reporting without leaving your app.
+
 ## [0.2.0] — 2026-11-05
 
 ### Added
@@ -1004,6 +1009,7 @@ ship the wiring now; expect real verdicts when the backend lands.
   row with CryptoKit instead of encrypting the database file.
 - iOS 15+ / macOS 12+.
 
-[Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.1
 [0.2.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.0
 [0.1.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.1.0
