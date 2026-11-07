@@ -32,7 +32,8 @@ import PackageDescription
 // swift-binary-target:begin
 let reportCore: Target = .binaryTarget(
   name: "TraciveReportCore",
-  path: "Frameworks/TraciveReportCore.xcframework"
+  url: "https://github.com/pleistocent/tracive-sdk-swift/releases/download/0.2.2/TraciveReportCore.xcframework.zip",
+  checksum: "cd7b1292bed6469a3e38787b765282711e4900d85f1582b00924ee091302bce2"
 )
 // swift-binary-target:end
 

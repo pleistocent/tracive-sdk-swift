@@ -7,6 +7,19 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-11-08
+
+### Added
+- The `TraciveSDKExtended` and `TraciveSDKExtendedUI` products now live in this repository and share
+  its version. They let a user report a scammer from inside your app, on iOS. See
+  [`Docs/extended.md`](Docs/extended.md). Their 0.2.1 went out from a separate repository, which no
+  longer holds them; 0.2.2 is the same code.
+
+### Changed
+- `TraciveSDK` itself has no change in this release. SwiftPM now downloads the `TraciveReportCore`
+  zip, about 19 MB, when it resolves this package, whichever products you use. Nothing from it links
+  into your app unless you add one of the extended products.
+
 ## [0.2.1] — 2026-11-07
 
 ### Documentation
@@ -1009,7 +1022,8 @@ ship the wiring now; expect real verdicts when the backend lands.
   row with CryptoKit instead of encrypting the database file.
 - iOS 15+ / macOS 12+.
 
-[Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.2.1...HEAD
+[Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.2.2...HEAD
+[0.2.2]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.2
 [0.2.1]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.1
 [0.2.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.0
 [0.1.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.1.0

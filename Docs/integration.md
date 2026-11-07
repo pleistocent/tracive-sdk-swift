@@ -12,7 +12,7 @@ How to wire the Tracive SDK into an iOS app, end to end.
 
 ```swift
 // Package.swift
-.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.1")
+.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.2")
 ```
 
 In Xcode: **File → Add Package Dependencies…**, then add `TraciveSDK` to your app target.
