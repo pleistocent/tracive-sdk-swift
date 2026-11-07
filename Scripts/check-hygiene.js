@@ -61,7 +61,7 @@ const SKIP_DIRECTORIES = new Set(['.build', '.git', 'Pods', 'DerivedData', '.swi
 // Extensions scanned without sniffing. A file with no extension, or a dotfile, is sniffed
 // instead — see `looksLikeText` — because LICENSE, .gitignore and .npmrc are all plain text that
 // this script used to walk straight past.
-const TEXT_EXTENSIONS = new Set(['.swift', '.md', '.yml', '.yaml', '.json', '.plist', '.sh', '.entitlements', '.sha256']);
+const TEXT_EXTENSIONS = new Set(['.swift', '.md', '.yml', '.yaml', '.json', '.plist', '.sh', '.entitlements', '.sha256', '.strings', '.py', '.xcconfig', '.xcprivacy', '.pbxproj', '.xcscheme']);
 
 // The one allowed exception, and the only permitted matches for the org token.
 //
@@ -81,6 +81,12 @@ const ALLOWED_PLEISTOCENT_PATTERNS = [
   /github\.com\/pleistocent\/tracive-sdk-swift(\.git)?(?![A-Za-z0-9._-])/g,
   /pleistocent\/tracive-sdk-swift(?![A-Za-z0-9._-])/g,
 ];
+
+// Where Indonesian is the content, not the working language of the repository: the translation, and
+// the tests that read it or stand in for what an Indonesian user types. Only the language rule uses
+// this, so every other rule still reads these files.
+const INDONESIAN_BY_DESIGN =
+  /^(Sources\/TraciveSDKExtendedUI\/Resources\/id\.lproj|Tests\/TraciveSDKExtended(UI)?Tests)\//;
 
 const RULES = [
   {
@@ -106,6 +112,15 @@ const RULES = [
     code: 'internal_document_reference',
     pattern: /\b(internal design doc|design doc:|RFC-INT|internal spec)\b/gi,
     message: 'references an internal document',
+  },
+  {
+    code: 'non_english_jargon',
+    // Say "phase 1" / "phase 2". Ordinary Indonesian dictionary words, so publishing them discloses
+    // nothing beyond the existence of the language.
+    pattern:
+      /\b(tahap|rencana|pengguna|laporan|penipuan|penipu|keamanan|kebutuhan|jadwal|catatan|sasaran|anggaran|kuota|pemeriksaan|rekening)\b/gi,
+    exemptPath: INDONESIAN_BY_DESIGN,
+    message: 'Indonesian outside a translation or a test',
   },
 ];
 
@@ -253,6 +268,7 @@ for (const path of walk(ROOT)) {
   const lines = readFileSync(path, 'utf8').split('\n');
   lines.forEach((line, index) => {
     for (const rule of rules) {
+      if (rule.exemptPath?.test(relativePath)) continue;
       rule.pattern.lastIndex = 0;
       const match = rule.pattern.exec(line);
       if (match !== null) {

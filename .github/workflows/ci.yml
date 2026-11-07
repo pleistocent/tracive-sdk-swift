@@ -2,6 +2,10 @@ name: CI
 
 # Every unit test in this package runs offline against injected fakes — no test may depend on a
 # live host. If a job here ever needs network access to go green, something has been wired up wrong.
+# The one exception is SwiftPM downloading the TraciveReportCore zip when it resolves the package.
+#
+# So every job needs Package.swift in its url form. A commit with the local path has no binary on a
+# runner, and every step below fails with "could not be mapped to an artifact". See CONTRIBUTING.md.
 
 # ---------------------------------------------------------------------------------------------
 # CI IS OFF — re-enable when there is budget for it.
@@ -151,10 +155,10 @@ jobs:
         run: shasum -a 256 -c Tests/TraciveSDKTests/Fixtures/report-package-vectors.sha256
 
       - name: Build
-        run: swift build -v
+        run: swift build --target TraciveSDK -v
 
       - name: Test
-        run: swift test -v
+        run: swift test --filter TraciveSDKTests -v
 
       - name: Swift 6 language mode
         # `swift-tools-version:5.9` means the package builds in Swift 5 mode, where data-race
@@ -170,13 +174,13 @@ jobs:
         # Verified to be capable of failing: a plain `swift build` accepts a nonisolated global
         # mutable var without a single diagnostic, while this step rejects it with
         # "not concurrency-safe because it is nonisolated global shared mutable state".
-        run: swift build -Xswiftc -swift-version -Xswiftc 6
+        run: swift build --target TraciveSDK -Xswiftc -swift-version -Xswiftc 6
 
       - name: Strict concurrency, warnings as errors
         # `-strict-concurrency=complete` on its own only *warns*, so as a CI step it could never go
         # red — a check that cannot fail. `-warnings-as-errors` is what gives it teeth, and it also
         # keeps the build warning-clean, which it is today.
-        run: swift build -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
+        run: swift build --target TraciveSDK -Xswiftc -strict-concurrency=complete -Xswiftc -warnings-as-errors
 
       - name: Build for iOS
         # `swift build` on this runner compiles for macOS only, so everything behind
@@ -198,6 +202,26 @@ jobs:
             -destination 'generic/platform=iOS' \
             -skipPackagePluginValidation \
             build
+
+      - name: Extended tests on an iOS Simulator
+        # TraciveReportCore has no macOS slice, so nothing above compiles the extended products, and
+        # on a Mac their test targets are empty. This is the only step that runs them.
+        #
+        # The device is read off the image rather than named. `name=` alone resolves against
+        # OS:latest, which fails when the newest runtime has no such device.
+        run: |
+          device=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(d["udid"] for runtime in sorted(devices, reverse=True) if "iOS" in runtime
+                     for d in devices[runtime] if d["name"].startswith("iPhone")))
+          ')
+          xcodebuild test \
+            -scheme TraciveSDK-Package \
+            -destination "id=$device" \
+            -only-testing:TraciveSDKExtendedTests \
+            -only-testing:TraciveSDKExtendedUITests \
+            -skipPackagePluginValidation
 
   build-example:
     name: build the example app
@@ -292,3 +316,16 @@ jobs:
             plutil -p "$app/Info.plist" | grep -q '"CFBundleIconName" => "AppIcon"' \
               || { echo "::error::$flavor: CFBundleIconName missing from the built app — ASSETCATALOG_COMPILER_APPICON_NAME did not resolve, and the home-screen icon will be a grey placeholder."; exit 1; }
           done
+
+      - name: The extended sample's project matches its spec, and it builds
+        working-directory: ExtendedExample
+        run: |
+          xcodegen generate
+          git diff --exit-code -- TraciveExtendedSample.xcodeproj \
+            || { echo "::error::TraciveExtendedSample.xcodeproj does not match project.yml. Run 'cd ExtendedExample && xcodegen generate' and commit the result."; exit 1; }
+          xcodebuild \
+            -project TraciveExtendedSample.xcodeproj \
+            -scheme demo \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath DerivedData \
+            build

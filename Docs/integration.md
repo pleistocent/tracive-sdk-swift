@@ -18,7 +18,8 @@ How to wire the Tracive SDK into an iOS app, end to end.
 In Xcode: **File → Add Package Dependencies…**, then add `TraciveSDK` to your app target.
 
 Requires iOS 15+. The package has no dependencies of its own, so nothing else appears in your
-dependency graph.
+dependency graph. SwiftPM also downloads the binary behind the optional extended products when it
+resolves the package, but that binary links into your app only if you add one of them.
 
 ## 2. Declare the Tracive app in `Info.plist`
 

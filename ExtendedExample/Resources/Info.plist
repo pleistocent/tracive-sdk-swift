@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>$(TRACIVE_DISPLAY_NAME)</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>$(PRODUCT_NAME)</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>UILaunchScreen</key>
+  <dict/>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+
+  <!-- authorize() checks for the Tracive app with these, as in the base SDK. -->
+  <key>LSApplicationQueriesSchemes</key>
+  <array>
+    <string>tracive</string>
+    <string>tracivesandbox</string>
+    <string>$(TRACIVE_APP_SCHEME)</string>
+  </array>
+
+  <key>TraciveFlavor</key>
+  <string>$(TRACIVE_FLAVOR)</string>
+  <key>TraciveBaseURL</key>
+  <string>$(TRACIVE_BASE_URL)</string>
+  <key>TraciveClientId</key>
+  <string>$(TRACIVE_CLIENT_ID)</string>
+  <key>TraciveAppScheme</key>
+  <string>$(TRACIVE_APP_SCHEME)</string>
+  <key>TraciveRedirectURI</key>
+  <string>$(TRACIVE_REDIRECT_SCHEME)://oauth/callback</string>
+
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleURLName</key>
+      <string>$(PRODUCT_BUNDLE_IDENTIFIER).oauth</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>$(TRACIVE_REDIRECT_SCHEME)</string>
+      </array>
+    </dict>
+  </array>
+
+  <!-- Only so the demo flavor can reach demo-server.py over plain http. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+</dict>
+</plist>

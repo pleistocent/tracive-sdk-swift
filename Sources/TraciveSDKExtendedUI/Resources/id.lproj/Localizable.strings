@@ -1,0 +1,85 @@
+"form_title" = "Buat Laporan";
+"status_title" = "Status Laporan";
+"close" = "Tutup";
+"retry" = "Coba Lagi";
+"done" = "Selesai";
+"remove" = "Hapus";
+"send" = "Kirim";
+"sending" = "Mengirim… %ld%%";
+"count" = "%1$ld/%2$ld";
+"load_failed" = "Halaman ini gagal dimuat";
+
+"media_title" = "Media Penipu";
+"media_phone" = "Nomor telepon";
+"media_email" = "Email";
+"media_bank" = "Rekening bank";
+"media_crypto" = "Alamat kripto";
+"media_social" = "Media sosial";
+"media_other" = "Akun";
+
+"date_label" = "Tanggal Kejadian";
+"date_placeholder" = "Pilih tanggal";
+"title_label" = "Judul Laporan";
+"title_placeholder" = "Contoh: Penipuan jual beli HP di Facebook";
+"chronology_label" = "Cerita Anda";
+"chronology_description" = "Jelaskan bagaimana Anda dihubungi dan apa yang terjadi. Jelaskan sedetail mungkin. Minimal %ld karakter.";
+"chronology_placeholder" = "Contoh: Awalnya dia menawarkan barang murah lewat DM, saya sudah transfer tapi langsung diblokir";
+"comment_label" = "Komentar Anda";
+"comment_description" = "Semua orang akan melihatnya di halaman detail pencarian. Nama Anda tidak akan ditampilkan. Ini opsional.";
+"evidence_label" = "Bukti";
+"evidence_description" = "Unggah tangkapan layar, pesan, riwayat transaksi atau bukti lainnya. Maksimal %ld file.";
+"evidence_file" = "File";
+"evidence_preparing" = "Mengompresi…";
+"evidence_ready" = "Siap";
+"add_photos" = "Tambah Foto";
+"add_pdf" = "Tambah PDF";
+
+"problem_no_identifier" = "Minimal 1 media diperlukan";
+"problem_too_many_identifiers" = "Satu laporan maksimal memuat %ld media";
+"problem_title_missing" = "Masukkan judul laporan";
+"problem_too_long" = "Maksimal %ld karakter";
+"problem_too_short" = "Minimal %ld karakter diperlukan";
+"problem_no_evidence" = "Minimal 1 bukti diperlukan";
+"problem_too_many_evidence" = "Anda bisa melampirkan maksimal %ld file";
+"problem_date_missing" = "Pilih tanggal kejadian";
+"problem_date_future" = "Tanggal tidak boleh di masa depan";
+"problem_evidence_preparing" = "Tunggu sampai file Anda siap.";
+"problem_evidence_failed" = "Hapus lampiran yang gagal dikompresi.";
+
+"terms_sentence" = "Dengan menekan Kirim, Anda menyetujui";
+"terms_and" = "dan";
+"term_terms_of_service" = "Ketentuan Layanan";
+"term_privacy_policy" = "Kebijakan Privasi";
+
+"error_needs_consent" = "Aplikasi ini perlu izin Anda di Tracive terlebih dulu.";
+"error_email_not_verified" = "Verifikasi email Anda di aplikasi Tracive, lalu coba lagi.";
+"error_report_not_found" = "Laporan bisa dicek selama 30 hari setelah dikirim.";
+"error_terms_outdated" = "Ketentuan berubah. Baca tautan baru di bawah, lalu tekan Kirim lagi.";
+"error_invalid_report" = "Tracive tidak bisa menerima laporan ini. Periksa isian Anda dan coba lagi.";
+"error_attachment_invalid" = "Tracive tidak bisa menerima salah satu file Anda. Hapus atau ganti file itu, lalu coba lagi.";
+"error_daily_limit" = "Batas laporan hari ini sudah tercapai. Coba lagi nanti.";
+"error_daily_limit_hour" = "Batas laporan hari ini sudah tercapai. Coba lagi sekitar %ld jam lagi.";
+"error_daily_limit_hours" = "Batas laporan hari ini sudah tercapai. Coba lagi sekitar %ld jam lagi.";
+"error_reporting_disabled" = "Pelaporan sedang dimatikan. Coba lagi nanti.";
+"error_network" = "Tidak bisa terhubung ke Tracive. Periksa koneksi Anda dan coba lagi.";
+"error_server" = "Tracive belum bisa memproses ini. Coba lagi sebentar lagi.";
+"error_unsupported_file" = "Hanya gambar dan file PDF yang bisa dilampirkan.";
+"error_file_too_large" = "PDF ini terlalu besar. Ukurannya harus di bawah 1 MB.";
+"error_image_unreadable" = "File ini tidak bisa dibaca atau diperkecil. Coba file lain.";
+
+"sent_title" = "Laporan terkirim";
+"sent_message" = "Terima kasih atas laporan Anda. Tim kami akan meninjau dan memverifikasi informasinya.";
+"sent_status" = "Status: %@";
+"view_status" = "Lihat Status";
+
+"status_submitted" = "Laporan terkirim";
+"status_submitted_line" = "Tracive sudah menerima laporan Anda dan akan segera meninjaunya.";
+"status_in_review" = "Sedang ditinjau";
+"status_in_review_line" = "Tracive sedang meninjau laporan Anda.";
+"status_reviewed" = "Sudah ditinjau";
+"status_reviewed_line" = "Tracive sudah selesai meninjau laporan ini.";
+"status_need_revision" = "Perlu perbaikan";
+"status_need_revision_line" = "Tracive perlu perubahan pada laporan Anda. Buka di Tracive untuk memperbaikinya.";
+"status_gone" = "Laporan ini sudah tidak bisa dicek";
+"open_in_tracive" = "Buka di Tracive";
+"tracive_missing" = "Aplikasi Tracive belum terpasang di perangkat ini.";

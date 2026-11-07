@@ -6,6 +6,11 @@ Packages/
 # — see the guard in .github/workflows/ci.yml.
 Package.resolved
 
+# The core's XCFramework is copied in from a build, or attached to a GitHub release. It never lives
+# in the tree. See CONTRIBUTING.md.
+Frameworks/
+*.xcframework.zip
+
 # Xcode
 DerivedData/
 *.xcuserstate
@@ -35,6 +40,9 @@ build/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Points the extended sample at a private environment. Tracked files name only the release hosts.
+ExtendedExample/Local.xcconfig
 
 # Secrets. Nothing in this SDK needs an API key — if one of these shows up in a working
 # copy, something is being integrated the wrong way.

@@ -1,0 +1,16 @@
+// The default: Tracive's sandbox.
+TRACIVE_FLAVOR = sandbox
+PRODUCT_BUNDLE_IDENTIFIER = id.tracive.sdk.extended.sample.sandbox
+TRACIVE_DISPLAY_NAME = Extended Sandbox
+
+// TODO(partner): your own sandbox client id, with this redirect scheme registered on it.
+TRACIVE_CLIENT_ID = REPLACE_WITH_YOUR_SANDBOX_CLIENT_ID
+TRACIVE_REDIRECT_SCHEME = tracive-extended-sample-sandbox
+
+// Empty means the sandbox API.
+TRACIVE_BASE_URL =
+TRACIVE_APP_SCHEME = tracivesandbox
+
+// Optional and git-ignored: any value above can be replaced there without touching this file.
+// Write a URL as https:/$()/host, because // starts a comment in an xcconfig.
+#include? "../Local.xcconfig"

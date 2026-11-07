@@ -21,6 +21,8 @@ const ref = collection('placeholder-name');
 See the internal design doc for the rollout order.
 # organisation_token
 package com.example.notpleistocent.placeholder
+# non_english_jargon
+Rencana rilis tahap dua.
 
 # --- entries from scripts/hygiene-terms.txt ---
 # server-side function declarations
@@ -35,5 +37,3 @@ gs://placeholder-bucket/exports
 https://placeholder-name.cloudfunctions.net/entrypoint
 # internal design-document title
 Superseded by ADR-014.
-# non-English roadmap jargon
-Rencana rilis tahap dua.

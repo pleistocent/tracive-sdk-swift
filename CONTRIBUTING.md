@@ -1,9 +1,12 @@
 # Contributing
 
 ```sh
-swift build
-swift test
+swift build --target TraciveSDK
+swift test --filter TraciveSDKTests
 ```
+
+Those two cover `TraciveSDK`. The extended products are iOS only: see
+[The extended products](#the-extended-products).
 
 macOS only. The package targets iOS 15 / macOS 12 and leans on CryptoKit, Security and the system
 libsqlite3; none of that exists on a Linux runner, so there is no Linux job to keep green.
@@ -11,7 +14,7 @@ libsqlite3; none of that exists on a Linux runner, so there is no Linux job to k
 > **CI is off.** The workflow is set to manual dispatch only, to stop metered Actions minutes on a
 > private repository — see the note at the top of `.github/workflows/ci.yml`, and re-enable it when
 > there is budget. Everything below still describes real gates; the only change is that **nothing
-> runs them for you**. Run `swift build && swift test` before you push, and read the rest of this file as instructions
+> runs them for you**. Run the two commands above before you push, and read the rest of this file as instructions
 > for a human rather than a description of a robot.
 
 ## Read the exit code, not the output
@@ -24,8 +27,10 @@ it has happened here.
 The last line is the total, and `$?` is the answer:
 
 ```sh
-swift test; echo "exit: $?"
+swift test --filter TraciveSDKTests; echo "exit: $?"
 ```
+
+Read the total too. A filter that matches nothing executes 0 tests and still exits 0.
 
 Do not reach for `${PIPESTATUS[0]}` to read it through a pipe. In zsh — the default shell on macOS,
 where this package is developed — that array is spelled `pipestatus` and is 1-indexed, so
@@ -34,6 +39,34 @@ at a glance reads exactly like success. Redirect to a file and read `$?` with no
 
 The swift-testing runner also announces `Test run with 0 tests in 0 suites passed`. That is not a
 warning: this package's tests are XCTest, so that runner legitimately has nothing to do.
+
+---
+
+## The extended products
+
+`TraciveSDKExtended` and `TraciveSDKExtendedUI` depend on the `TraciveReportCore` binary, which has no
+macOS slice. Their tests run on a simulator, and they compile to nothing in `swift test` on a Mac:
+
+```sh
+xcodebuild test -scheme TraciveSDK-Package -destination 'id=<simulator udid>' \
+  -skipPackagePluginValidation
+```
+
+`Package.swift` takes the binary from one of two places, between its `swift-binary-target` markers:
+
+- **A local path**, `Frameworks/TraciveReportCore.xcframework`, which is git-ignored. Build it in
+  `tracive-sdk-kotlin` with `./gradlew :tracive-sdk-extended:assembleTraciveReportCoreReleaseXCFramework`
+  and copy it there. Without that file nothing here builds, `TraciveSDK` included.
+- **A release URL.** Every tag must carry this form, because a partner has no local file. A tag with
+  the local path breaks every partner who resolves it, whichever products they use.
+
+```sh
+swift package compute-checksum TraciveReportCore.xcframework.zip
+Scripts/swift-binary-target.sh <url> <checksum>   # Scripts/swift-binary-target.sh --local goes back
+```
+
+Keep `#if os(iOS)` out of `Sources/TraciveSDKExtended*`: the Flutter and React Native pods copy those
+files and must stay in sync. The test files are not copied, which is why the guard is there instead.
 
 ---
 
@@ -54,7 +87,7 @@ reached a real host would fail whenever that environment is down or mid-deploy.
 - **No third-party dependencies**, in either manifest.
 
 That last one is a design commitment, not tidiness: a partner integrating a fraud-check SDK takes on
-its supply chain, and this package hands them none.
+its supply chain, and the `TraciveSDK` product hands them none.
 
 The guard asserts against `swift package dump-package` rather than `Package.resolved`, and that
 detail is load-bearing. The earlier version resolved the package and then inspected the lockfile

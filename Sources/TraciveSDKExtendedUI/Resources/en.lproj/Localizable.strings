@@ -1,0 +1,85 @@
+"form_title" = "Create Report";
+"status_title" = "Report Status";
+"close" = "Close";
+"retry" = "Retry";
+"done" = "Done";
+"remove" = "Remove";
+"send" = "Send";
+"sending" = "Sending… %ld%%";
+"count" = "%1$ld/%2$ld";
+"load_failed" = "Couldn't load this page";
+
+"media_title" = "Scammer's Media";
+"media_phone" = "Phone number";
+"media_email" = "Email";
+"media_bank" = "Bank account";
+"media_crypto" = "Crypto address";
+"media_social" = "Social media";
+"media_other" = "Account";
+
+"date_label" = "Date of Incident";
+"date_placeholder" = "Select date";
+"title_label" = "Report Title";
+"title_placeholder" = "Example: Phone sale scam on Facebook";
+"chronology_label" = "Your Story";
+"chronology_description" = "Describe how you were contacted and what happened. Be as detailed as possible. Min %ld characters.";
+"chronology_placeholder" = "Example: He DMed me offering cheap stuff, I transferred the money and got blocked right after";
+"comment_label" = "Your Comment";
+"comment_description" = "Everyone will see it on the search details page. Your name won't be shown. It's optional.";
+"evidence_label" = "Evidence";
+"evidence_description" = "Upload screenshots, messages, transaction history or other proofs. Up to %ld files.";
+"evidence_file" = "File";
+"evidence_preparing" = "Compressing…";
+"evidence_ready" = "Ready";
+"add_photos" = "Add Photos";
+"add_pdf" = "Add PDF";
+
+"problem_no_identifier" = "Add at least 1 media";
+"problem_too_many_identifiers" = "A report can name up to %ld media";
+"problem_title_missing" = "Enter report title";
+"problem_too_long" = "Maximum %ld characters";
+"problem_too_short" = "At least %ld characters are required";
+"problem_no_evidence" = "At least 1 evidence is required";
+"problem_too_many_evidence" = "You can attach up to %ld files";
+"problem_date_missing" = "Select date of incident";
+"problem_date_future" = "The date can't be in the future";
+"problem_evidence_preparing" = "Wait until your files are ready.";
+"problem_evidence_failed" = "Remove the attachment that couldn't be compressed.";
+
+"terms_sentence" = "By tapping Send, you agree to";
+"terms_and" = "and";
+"term_terms_of_service" = "Terms of Service";
+"term_privacy_policy" = "Privacy Policy";
+
+"error_needs_consent" = "This app needs your permission in Tracive first.";
+"error_email_not_verified" = "Verify your email in the Tracive app, then try again.";
+"error_report_not_found" = "Reports can be checked for 30 days after they're sent.";
+"error_terms_outdated" = "The terms changed. Read the new links below, then tap Send again.";
+"error_invalid_report" = "Tracive couldn't accept this report. Check the fields and try again.";
+"error_attachment_invalid" = "Tracive couldn't accept one of your files. Remove it or pick another, then try again.";
+"error_daily_limit" = "You've reached today's report limit. Try again later.";
+"error_daily_limit_hour" = "You've reached today's report limit. Try again in about %ld hour.";
+"error_daily_limit_hours" = "You've reached today's report limit. Try again in about %ld hours.";
+"error_reporting_disabled" = "Reporting is switched off for now. Try again later.";
+"error_network" = "Can't reach Tracive. Check your connection and try again.";
+"error_server" = "Tracive couldn't process this right now. Try again in a moment.";
+"error_unsupported_file" = "Only images and PDF files can be attached.";
+"error_file_too_large" = "This PDF is too large. It must be smaller than 1 MB.";
+"error_image_unreadable" = "This file couldn't be read or made small enough. Try another one.";
+
+"sent_title" = "Report sent";
+"sent_message" = "Thank you for your report. Our team will review it and verify the information.";
+"sent_status" = "Status: %@";
+"view_status" = "View Status";
+
+"status_submitted" = "Report sent";
+"status_submitted_line" = "Tracive has your report and will start reviewing it soon.";
+"status_in_review" = "In review";
+"status_in_review_line" = "Tracive is reviewing your report.";
+"status_reviewed" = "Reviewed";
+"status_reviewed_line" = "Tracive has finished reviewing this report.";
+"status_need_revision" = "Needs revision";
+"status_need_revision_line" = "Tracive needs a change to your report. Open it in Tracive to make the change.";
+"status_gone" = "This report can no longer be checked";
+"open_in_tracive" = "Open in Tracive";
+"tracive_missing" = "Tracive isn't installed on this device.";

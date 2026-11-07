@@ -1,0 +1,9 @@
+// demo-server.py on this machine: the screens with no Tracive app and no grant.
+TRACIVE_FLAVOR = demo
+PRODUCT_BUNDLE_IDENTIFIER = id.tracive.sdk.extended.sample.demo
+TRACIVE_DISPLAY_NAME = Extended Demo
+
+TRACIVE_CLIENT_ID = demo-client
+TRACIVE_REDIRECT_SCHEME = tracive-extended-sample-demo
+TRACIVE_BASE_URL = http:/$()/127.0.0.1:18787/v1
+TRACIVE_APP_SCHEME = tracive

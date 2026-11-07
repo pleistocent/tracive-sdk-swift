@@ -56,7 +56,8 @@ that is the bug.
 ## Zero third-party dependencies, by design
 
 `Package.swift` has **no `dependencies:` array**, and CI fails the build if a third-party
-dependency is ever declared — in this package or in the Example.
+dependency is ever declared — in this package or in the Example. The optional extended products are
+the one exception to what follows: see [`Docs/extended.md`](Docs/extended.md).
 
 This is a feature, not an accident of scope. When you add a fraud-check SDK you inherit its supply
 chain: every transitive package is another maintainer who can ship code into your app, another
@@ -351,6 +352,10 @@ it, `canOpenURL` answers `false` and every user gets the identifier-only link in
 nothing breaks, but the receipt never arrives. Sandbox and production each have their own build,
 scheme and file type, so a sandbox client hands reports only to the sandbox app.
 
+To let the user report without leaving your app, add the `TraciveSDKExtended` product, or
+`TraciveSDKExtendedUI` for Tracive's screens. They are separate products because their binary adds a
+14 MB framework, and they are iOS only. See [`Docs/extended.md`](Docs/extended.md).
+
 Limits, checked before anything opens (the Tracive app checks them again):
 
 | | |
@@ -562,10 +567,12 @@ release still reaches you intact.
 |---|---|
 | [`Docs/architecture.md`](Docs/architecture.md) | the diagram set: components, consent, tokens, cache routing, folding |
 | [`Docs/integration.md`](Docs/integration.md) | wiring it into an app, end to end |
+| [`Docs/extended.md`](Docs/extended.md) | in-app reporting, with Tracive's screens or your own UI |
 | [`Docs/oauth.md`](Docs/oauth.md) | the consent flow, PKCE, token refresh, sign-out |
 | [`Docs/caching.md`](Docs/caching.md) | storage format, encryption, TTLs, threat model |
 | [`Docs/proxy-contract.md`](Docs/proxy-contract.md) | phase 2 Proxy mode, for planning |
 | [`SECURITY.md`](SECURITY.md) | reporting a vulnerability |
+| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | what the extended products embed |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed |
 
 ---
@@ -573,8 +580,8 @@ release still reaches you intact.
 ## Development
 
 ```bash
-swift build
-swift test          # 100% offline: no network, no Keychain, no real server
+swift build --target TraciveSDK
+swift test --filter TraciveSDKTests    # 100% offline: no network, no Keychain, no real server
 ```
 
 The tests use `EphemeralCacheKeyStore` rather than the real Keychain, because a `swift test` binary

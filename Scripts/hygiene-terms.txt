@@ -51,10 +51,3 @@
 # cites IETF RFCs (7636, 8252), and a rule that fires on those would be turned off within a week.
 # ---------------------------------------------------------------------------------------------
 /\b(ADR|PRD|HLD|LLD)[-_ ]?\d{1,4}\b/
-
-# ---------------------------------------------------------------------------------------------
-# Roadmap jargon in a language other than English. Say "phase 1" / "phase 2". These are ordinary
-# Indonesian dictionary words — publishing them discloses nothing beyond the existence of the
-# language.
-# ---------------------------------------------------------------------------------------------
-/\b(tahap|rencana|pengguna|laporan|penipuan|penipu|keamanan|kebutuhan|jadwal|catatan|sasaran|anggaran|kuota|pemeriksaan|rekening)\b/i
