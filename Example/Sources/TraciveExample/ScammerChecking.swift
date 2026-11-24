@@ -87,6 +87,10 @@ public struct SampleChecker: ScammerChecking {
       "Reports are submitted by Tracive users and are not verified by Tracive. "
       + "Treat them as signals, not as proof."
 
+    let qris =
+      query.kind == .qris
+      ? QrisDetails(merchantName: "TOKO CONTOH SANDBOX", city: "JAKARTA", criteria: .umi) : nil
+
     // Keyed off the last digit purely so every tier is reachable from the demo UI.
     switch query.searchQueryIndex.last {
     case "1":
@@ -102,6 +106,7 @@ public struct SampleChecker: ScammerChecking {
         fraudAmount: ["IDR": 487_500_000],
         tags: ["investasi", "telegram", "impersonation"],
         relatedScammerCount: 6,
+        qris: qris,
         billing: Billing(creditSource: .user, unitsCharged: 1),
         disclaimer: disclaimer,
         origin: .server,
@@ -120,6 +125,7 @@ public struct SampleChecker: ScammerChecking {
         fraudAmount: ["IDR": 3_200_000],
         tags: ["olshop"],
         relatedScammerCount: 1,
+        qris: qris,
         billing: Billing(creditSource: .user, unitsCharged: 1),
         disclaimer: disclaimer,
         origin: .server,
@@ -136,6 +142,11 @@ public struct SampleChecker: ScammerChecking {
         ambiguousReports: 1,
         lastReportOn: "2026-08",
         tags: ["unverified"],
+        qris: qris,
+        rightOfReply: qris.map { _ in
+          RightOfReply(
+            text: "Kami pemilik usaha ini. QRIS ini dipasang di kasir toko kami.", language: "id")
+        },
         billing: Billing(creditSource: .user, unitsCharged: 1),
         disclaimer: disclaimer,
         origin: .server,

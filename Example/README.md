@@ -17,6 +17,10 @@ cannot rot silently.
 - The SDK's real encrypted cache in front of the check, so the same number twice returns
   `origin == .cache`.
 - A verdict rendered as *advice*, not as a ruling, with `CheckResult.disclaimer` always visible.
+- A **QRIS** switch on the same screen. One field takes a scanned payload, an NMID or a merchant
+  PAN, and **Use the sandbox QR** fills in the sandbox's HIGH QRIS (`ID9900000000101`). When the
+  QRIS owner has replied, `rightOfReply.text` sits right below the warning, as written. QRIS checks
+  need an agreement that covers QRIS; without one the API answers `unsupportedInputType`.
 - Provenance in the UI: a cached answer says so, and says how old it is.
 - Every `TraciveError` mapped to something a user can act on — including the 402, handled by catching
   it rather than by calling `credits()` first.
@@ -34,10 +38,11 @@ verdicts keyed on the last digit of the number:
 |---|---|
 | `1` | `HIGH` — 23 reports, tags, linked accounts |
 | `2` | `ELEVATED` |
-| `3` | `CAUTION` |
+| `3` | `CAUTION` (a QRIS also gets the owner's right of reply) |
 | `9` | throws `insufficientCredits` (the 402 path) |
 | anything else | `NONE`, `found == false` |
 
+A QRIS keys on the last digit of its NMID or PAN the same way, and its hits carry `qris` details.
 Check the same number twice and the second answer comes back from the cache.
 
 ## Wiring it to the real SDK

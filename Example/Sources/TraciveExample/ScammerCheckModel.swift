@@ -11,6 +11,16 @@ public enum ScammerCheckState: Equatable {
   case failure(String)
 }
 
+/// What the check screen's input field holds.
+public enum ScammerCheckMode: String, CaseIterable, Identifiable, Sendable {
+  case phone = "Phone"
+  /// A QRIS payload, an NMID or a merchant PAN. Only for an organisation whose Tracive agreement
+  /// covers QRIS.
+  case qris = "QRIS"
+
+  public var id: String { rawValue }
+}
+
 /// The view model behind `ScammerCheckView`.
 ///
 /// It exists mainly to keep two things out of the view: the E.164 normalisation that has to happen
@@ -19,7 +29,15 @@ public enum ScammerCheckState: Equatable {
 public final class ScammerCheckModel: ObservableObject {
 
   @Published public var input: String = ""
+  @Published public var mode: ScammerCheckMode = .phone
   @Published public private(set) var state: ScammerCheckState = .idle
+
+  /// The sandbox's HIGH QRIS (NMID `ID9900000000101`), as a QR decoder returns it. Its PAN,
+  /// `936099990000010100`, finds the same merchant.
+  public static let sandboxQrisPayload =
+    "00020101021126550011ID.DANA.WWW01189360999900000101000207SBX00010303UMI"
+    + "51440014ID.CO.QRIS.WWW0215ID99000000001010303UMI5204581253033605802ID"
+    + "5919TOKO CONTOH SANDBOX6007JAKARTA6105101106304AF35"
 
   private let checker: any ScammerChecking
   // TODO(partner): read this from the user's SIM or their profile. A constant is wrong for anyone
@@ -44,14 +62,19 @@ public final class ScammerCheckModel: ObservableObject {
 
     let query: TraciveQuery
     do {
-      query = try TraciveQuery.phone(e164: Self.toE164(input, dialCode: defaultDialCode))
+      switch mode {
+      case .phone:
+        query = try TraciveQuery.phone(e164: Self.toE164(input, dialCode: defaultDialCode))
+      case .qris:
+        query = try Self.qrisQuery(input)
+      }
     } catch let error as TraciveQueryError {
       // Rejected locally, before any request left the device. Nothing was billed — which is the
       // entire point of validating in the builder.
-      state = .failure(error.errorDescription ?? "That does not look like a phone number.")
+      state = .failure(error.errorDescription ?? notRecognised)
       return
     } catch {
-      state = .failure("That does not look like a phone number.")
+      state = .failure(notRecognised)
       return
     }
 
@@ -67,6 +90,27 @@ public final class ScammerCheckModel: ObservableObject {
   public func reset() {
     input = ""
     state = .idle
+  }
+
+  public func useSandboxQris() {
+    mode = .qris
+    input = Self.sandboxQrisPayload
+    state = .idle
+  }
+
+  private var notRecognised: String {
+    mode == .phone ? "That does not look like a phone number." : "That does not look like a QRIS."
+  }
+
+  // MARK: - QRIS
+
+  /// One field takes all three forms: a scanned payload starts with `000201`, an NMID with `ID`,
+  /// and anything else is read as the PAN from a receipt.
+  public static func qrisQuery(_ raw: String) throws -> TraciveQuery {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("000201") { return try TraciveQuery.qris(payload: raw) }
+    if trimmed.uppercased().hasPrefix("ID") { return try TraciveQuery.qris(nmid: raw) }
+    return try TraciveQuery.qris(pan: raw)
   }
 
   // MARK: - E.164
@@ -107,14 +151,16 @@ public final class ScammerCheckModel: ObservableObject {
       return "Your Tracive connection expired. Connect again to continue."
     case .missingScope, .detailNotPermitted:
       return "This app is not allowed to run that check."
+    case .unsupportedInputType:
+      return "This app's Tracive agreement does not cover this kind of check."
     case .cacheMiss:
-      return "No saved result for this number, and the check was set to use the cache only."
+      return "No saved result for this check, and it was set to use the cache only."
     case .network:
       return "You appear to be offline. Check your connection and try again."
     case .notImplemented(let message):
       return message
     case .invalidQuery(let queryError):
-      return queryError.errorDescription ?? "That does not look like a phone number."
+      return queryError.errorDescription ?? "That is not something Tracive can check."
     default:
       return "Tracive could not complete the check. Please try again."
     }
