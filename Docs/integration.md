@@ -513,6 +513,8 @@ If you build queries from user input, test the folding: `+62 812-3456-7891`, `+6
 - [ ] `.appNotInstalled` has a real UI path, not a silent no-op
 - [ ] Phone numbers are normalised to E.164 before `TraciveQuery.phone`
 - [ ] `result.disclaimer` is displayed wherever the verdict is
+- [ ] QRIS only if your agreement covers it: the result is a warning before payment, never a block,
+      and `result.rightOfReply?.text` sits below the warning, as written
 - [ ] 402 is handled; `credits()` is not called before each check
 - [ ] Retries — if you have any — pass an `Idempotency-Key`
 - [ ] Sign-out goes through `client.signOut()`, which clears the cache as well as the grant

@@ -181,7 +181,7 @@ response is not sending one.
 **Do not retry a check without an `Idempotency-Key`.** The SDK cannot tell whether the first attempt
 was billed, so a blind retry risks charging a partner twice for one answer.
 
-**Do not add a `domain()` query builder.** The Tracive API indexes five identifier types. A domain
+**Do not add a `domain()` query builder.** The Tracive API indexes six identifier types. A domain
 key would match nothing — and a miss is still billed, so the cost of the mistake lands on the
 integrator.
 

@@ -91,6 +91,11 @@ let status = try await reports.status(reportId)
 reports.openInTracive(reportId)
 ```
 
+A report may name a QRIS: build its query with `.qris(payload:)` or `.qris(nmid:)`, never
+`.qris(pan:)`. The API accepts up to three `QRIS_<NMID>` identifiers, only for an organisation whose
+agreement covers QRIS, and never a PAN. Attach the QR image as evidence; the server finds the code in
+it. The form shows a QRIS identifier as **QRIS** over its NMID.
+
 Cancelling the Swift `Task` cancels the upload. Keep the same draft across retries: its idempotency
 key is what stops a retry becoming a second report.
 

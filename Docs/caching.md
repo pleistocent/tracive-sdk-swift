@@ -184,6 +184,17 @@ server-side check — and a cache hit is not one, which is why `checkId` is `nil
 **If a future version ever caches full detail, the key must become `(query, detail, locale)`.** That
 note is in the code as well, at `CheckResult.cacheableCopy()` and on the `CheckCache` protocol.
 
+A QRIS hit's `qris` and `rightOfReply` are kept: both ride on every detail level and neither is
+translated. A row written before they existed decodes with both `nil`.
+
+### A QRIS checked by PAN and by NMID is two entries
+
+The cache keys on the query as sent. `TraciveQuery.qris(pan:)` builds `QRIS_<PAN>`, and the server
+maps that PAN to its NMID only after the charge, so the SDK cannot know which NMID it belongs to.
+The same merchant checked by PAN and then by NMID (or by payload, which keys on the NMID) is
+therefore two rows, and the second check is billed. Prefer the payload or the NMID when you have
+one.
+
 ### The consequence for `detail: .full`: the cache is bypassed in both directions
 
 `detail` is the one thing outside `source` that changes cache routing, and it does so on the way in
