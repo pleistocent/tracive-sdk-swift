@@ -103,6 +103,9 @@ final class QueryGrammarTests: XCTestCase {
     let address: String?
     let platform: String?
     let handle: String?
+    let payload: String?
+    let nmid: String?
+    let pan: String?
   }
 
   private static func loadFixtureData() throws -> Data {
@@ -221,6 +224,13 @@ final class QueryGrammarTests: XCTestCase {
         platform: try XCTUnwrap(input.platform),
         handle: try XCTUnwrap(input.handle)
       )
+    case "QRIS":
+      // Exactly one of the three, so a vector cannot be driven through another builder.
+      let sent = [input.payload, input.nmid, input.pan].compactMap { $0 }
+      guard sent.count == 1 else { throw AmbiguousQrisInput(count: sent.count) }
+      if let payload = input.payload { return try TraciveQuery.qris(payload: payload) }
+      if let nmid = input.nmid { return try TraciveQuery.qris(nmid: nmid) }
+      return try TraciveQuery.qris(pan: try XCTUnwrap(input.pan))
     case "RAW":
       // Not a builder: the raw string is fed straight to the document-id guard.
       try DocumentIdGuard.validate(try XCTUnwrap(input.value))
@@ -232,6 +242,7 @@ final class QueryGrammarTests: XCTestCase {
 
   private struct UnknownVectorType: Error { let type: String }
   private struct AmbiguousBankInput: Error { let selectors: [String] }
+  private struct AmbiguousQrisInput: Error { let count: Int }
   private struct RawEntryNotRejected: Error { let value: String }
 
   // MARK: - Tests
@@ -279,13 +290,13 @@ final class QueryGrammarTests: XCTestCase {
   func testFixtureIsTheExpectedContract() throws {
     let fixture = try loadFixture()
 
-    XCTAssertEqual(fixture.version, 6, "fixture schema version changed — re-read the rules")
+    XCTAssertEqual(fixture.version, 7, "fixture schema version changed — re-read the rules")
 
     // Pinned counts, not just non-emptiness. The fixture is vendored byte-identically into every
     // SDK; a vector silently dropped during a re-vendor would otherwise leave this suite green
     // while the contract shrank.
-    XCTAssertEqual(fixture.vectors.count, 42, "a vector was added or removed — re-read the fixture")
-    XCTAssertEqual(fixture.rejected.count, 21, "a rejection case was added or removed")
+    XCTAssertEqual(fixture.vectors.count, 61, "a vector was added or removed — re-read the fixture")
+    XCTAssertEqual(fixture.rejected.count, 37, "a rejection case was added or removed")
     XCTAssertEqual(
       fixture.documentIdGuard.cases.count,
       9,
@@ -294,7 +305,12 @@ final class QueryGrammarTests: XCTestCase {
 
     // Every media category the backend emits must be exercised by at least one vector.
     let coveredTypes = Set(fixture.vectors.map(\.type))
-    XCTAssertEqual(coveredTypes, ["PHONE", "EMAIL", "BANK", "CRYPTO", "USERNAME"])
+    XCTAssertEqual(coveredTypes, ["PHONE", "EMAIL", "BANK", "CRYPTO", "USERNAME", "QRIS"])
+    XCTAssertEqual(
+      Set(fixture.vectors.map(\.type)),
+      Set(TraciveQuery.Kind.allCases.map(\.rawValue)),
+      "every kind the SDK builds needs a vector, and every vector type a kind"
+    )
 
     // Ids are unique, so a duplicated id can never mask a dropped vector.
     XCTAssertEqual(Set(fixture.vectors.map(\.id)).count, fixture.vectors.count)
@@ -572,6 +588,39 @@ final class QueryGrammarTests: XCTestCase {
     XCTAssertFalse(query.description.contains("6281234567891"))
     XCTAssertFalse(String(reflecting: query).contains("6281234567891"))
     XCTAssertTrue(query.description.contains("PHONE"))
+  }
+
+  // MARK: - QRIS (fixture v7)
+
+  /// The published check value of CRC-16/CCITT-FALSE, so the CRC is pinned independently of the
+  /// vectors that also exercise it.
+  func testQrisCrcMatchesTheStandardCheckValue() {
+    XCTAssertEqual(QueryFolding.crc16Hex(Array("123456789".utf8)), "29B1")
+    XCTAssertEqual(QueryFolding.crc16Hex([UInt8]()), "FFFF")
+  }
+
+  func testQrisSpaceSetIsTheFiveTheRuleNames() throws {
+    let fixture = try loadFixture()
+    XCTAssertTrue(
+      try XCTUnwrap(fixture.rules["QRIS_NMID"]).contains("tab, LF, CR, space and U+00A0"))
+    XCTAssertEqual(
+      QueryFolding.qrisSpaces, ["\u{0009}", "\u{000A}", "\u{000D}", "\u{0020}", "\u{00A0}"])
+  }
+
+  /// All three builders produce a QRIS key, and a PAN key stays apart from the NMID key: the
+  /// server maps one to the other only after the charge, so they are two cache entries.
+  func testQrisBuildersShareAKindButNotACacheEntry() throws {
+    let byNmid = try TraciveQuery.qris(nmid: "ID1020000000033")
+    let byPan = try TraciveQuery.qris(pan: "936009143100000003")
+    let byPayload = try TraciveQuery.qris(
+      payload: "00020101021126610014COM.GO-JEK.WWW01189360091431000000030210G1000000030303UMI"
+        + "51440014ID.CO.QRIS.WWW0215ID10200000000330303UMI5204573453033605802ID5921CONTOH DIGITAL, "
+        + "Softw6005BOGOR61051691562070703A0163049C89")
+
+    XCTAssertEqual([byNmid.kind, byPan.kind, byPayload.kind], [.qris, .qris, .qris])
+    XCTAssertEqual(byPayload, byNmid)
+    XCTAssertNotEqual(CheckCacheKey(query: byPan), CheckCacheKey(query: byNmid))
+    XCTAssertFalse(byNmid.description.contains("ID1020000000033"))
   }
 
   // MARK: - crossLanguageSemantics (fixture v2)

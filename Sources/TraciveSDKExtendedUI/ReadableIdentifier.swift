@@ -7,6 +7,7 @@ struct ReadableIdentifier: Equatable {
     case bank
     case crypto
     case socialMedia
+    case qris
     case other
   }
 
@@ -51,6 +52,8 @@ struct ReadableIdentifier: Equatable {
       } else {
         parsed = other
       }
+    case "QRIS":
+      parsed = (.qris, value)
     default:
       parsed = other
     }
@@ -64,6 +67,7 @@ struct ReadableIdentifier: Equatable {
     case .bank: return ReportText.text("media_bank")
     case .crypto: return ReportText.text("media_crypto")
     case .socialMedia: return ReportText.text("media_social")
+    case .qris: return ReportText.text("media_qris")
     case .other: return ReportText.text("media_other")
     }
   }

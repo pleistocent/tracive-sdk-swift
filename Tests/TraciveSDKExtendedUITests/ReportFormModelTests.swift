@@ -477,6 +477,8 @@ final class ReadableIdentifierTests: XCTestCase {
     check("CRYPTO_ETH_0xabc_def", .crypto, "ETH 0xabc_def")
     check("USERNAME_INSTAGRAM_@tukang_tipu", .socialMedia, "Instagram @tukang_tipu")
     check("USERNAME_TIKTOK_tukang", .socialMedia, "Tiktok @tukang")
+    check("QRIS_ID1020000000033", .qris, "ID1020000000033")
+    XCTAssertEqual(ReadableIdentifier(key: "QRIS_ID1020000000033").label, "QRIS")
   }
 
   func testAKeyThatDoesNotParseIsShownAsItIs() {

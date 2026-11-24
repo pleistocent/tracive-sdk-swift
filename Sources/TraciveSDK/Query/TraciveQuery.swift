@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Build one with a factory — `TraciveQuery.phone(e164:)`, `.email(value:)`,
 /// `.bankAccount(countryAlpha3:bankCode:account:)` (or `bankShortCode:` / `bic:` in place of
-/// `bankCode:`), `.iban(iban:)`, `.crypto(chain:address:)`, `.username(platform:handle:)` — and
-/// hand it to `checkScammer`.
+/// `bankCode:`), `.iban(iban:)`, `.crypto(chain:address:)`, `.username(platform:handle:)`,
+/// `.qris(payload:)` (or `nmid:` / `pan:`) — and hand it to `checkScammer`.
 ///
 /// Two things happen at construction time, both before any network call can be made:
 ///
@@ -19,20 +19,49 @@ import Foundation
 ///
 /// ## There is no `domain()` builder
 /// A `DOMAIN` input type does not exist: the Tracive API indexes only
-/// PHONE / EMAIL / BANK / CRYPTO / USERNAME. A `DOMAIN_…` key could never hit, and the miss would
-/// still be charged. Do not add one.
+/// PHONE / EMAIL / BANK / CRYPTO / USERNAME / QRIS. A `DOMAIN_…` key could never hit, and the miss
+/// would still be charged. Do not add one.
 public struct TraciveQuery: Equatable, Hashable, Sendable, CustomStringConvertible,
   CustomDebugStringConvertible
 {
 
-  /// Which of the five backend media categories this key belongs to.
-  public enum Kind: String, Codable, CaseIterable, Hashable, Sendable {
-    case phone = "PHONE"
-    case email = "EMAIL"
+  /// Which backend media category this key belongs to: its prefix before the first `_`.
+  ///
+  /// A struct rather than an enum so the next type the API adds breaks nobody. SwiftPM builds
+  /// packages without library evolution, so a new enum case — even next to a `case unknown` —
+  /// would fail every exhaustive `switch` in a partner's app. Switch over the constants you handle
+  /// and keep a `default:`.
+  public struct Kind: RawRepresentable, Hashable, Codable, Sendable, CaseIterable,
+    CustomStringConvertible
+  {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+      self.rawValue = rawValue
+    }
+
+    public static let phone = Kind(rawValue: "PHONE")
+    public static let email = Kind(rawValue: "EMAIL")
     /// Covers every `bankAccount(countryAlpha3:…)` overload and `iban(iban:)`.
-    case bank = "BANK"
-    case crypto = "CRYPTO"
-    case username = "USERNAME"
+    public static let bank = Kind(rawValue: "BANK")
+    public static let crypto = Kind(rawValue: "CRYPTO")
+    public static let username = Kind(rawValue: "USERNAME")
+    /// Covers `qris(payload:)`, `qris(nmid:)` and `qris(pan:)`.
+    public static let qris = Kind(rawValue: "QRIS")
+
+    /// The kinds this version of the SDK builds. A later API may answer with one not listed here.
+    public static let allCases: [Kind] = [.phone, .email, .bank, .crypto, .username, .qris]
+
+    public var description: String { rawValue }
+
+    public init(from decoder: Decoder) throws {
+      self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+      var container = encoder.singleValueContainer()
+      try container.encode(rawValue)
+    }
   }
 
   public let kind: Kind
@@ -174,6 +203,45 @@ public struct TraciveQuery: Equatable, Hashable, Sendable, CustomStringConvertib
       kind: .username,
       searchQueryIndex: "USERNAME_\(foldedPlatform)_\(foldedHandle)"
     )
+  }
+
+  /// A QRIS, from the text a QR decoder returned for it.
+  ///
+  /// The key is the merchant's NMID (tag 51), never the PAN or the merchant name. The payload must
+  /// be intact (its CRC checks out), name an NMID, and belong to a micro or small business (UMI or
+  /// UKE): no other QRIS is ever indexed, so a check on one could only be a billed miss. Static and
+  /// dynamic QRIS are both accepted.
+  ///
+  /// Only for an organisation whose Tracive agreement covers QRIS. For any other, the check fails
+  /// with `TraciveError.unsupportedInputType`. Show the result as a warning before the user pays;
+  /// never block or hold a payment on it.
+  ///
+  /// - Throws: `TraciveQueryError` with `.notAQris`, `.qrisCrcMismatch`, `.qrisNoNmid` or
+  ///   `.qrisNotIndexed`, checked in that order.
+  public static func qris(payload: String) throws -> TraciveQuery {
+    try TraciveQuery(kind: .qris, searchQueryIndex: "QRIS_" + QueryFolding.foldQrisPayload(payload))
+  }
+
+  /// A QRIS, by the NMID printed on the merchant's sticker: `ID` and 13 digits.
+  ///
+  /// Tab, LF, CR, space and U+00A0 are removed wherever they sit, and the value is upper-cased, so
+  /// `id1020 0000 00033` is accepted.
+  ///
+  /// - Throws: `TraciveQueryError` with `.notAnNmid`.
+  public static func qris(nmid: String) throws -> TraciveQuery {
+    try TraciveQuery(kind: .qris, searchQueryIndex: "QRIS_" + QueryFolding.foldQrisNmid(nmid))
+  }
+
+  /// A QRIS, by the merchant PAN printed on a receipt: 18 digits, or 19 whose last digit is the
+  /// Luhn check digit (dropped).
+  ///
+  /// The server maps a PAN to its NMID after the charge, so a PAN it has never seen is a billed
+  /// miss. The local cache keeps this key apart from the NMID key: the same merchant checked by PAN
+  /// and by NMID is two cache entries.
+  ///
+  /// - Throws: `TraciveQueryError` with `.notAPan`.
+  public static func qris(pan: String) throws -> TraciveQuery {
+    try TraciveQuery(kind: .qris, searchQueryIndex: "QRIS_" + QueryFolding.foldQrisPan(pan))
   }
 
   // MARK: - Description

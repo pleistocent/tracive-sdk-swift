@@ -15,6 +15,7 @@
 "media_bank" = "Rekening bank";
 "media_crypto" = "Alamat kripto";
 "media_social" = "Media sosial";
+"media_qris" = "QRIS";
 "media_other" = "Akun";
 
 "date_label" = "Tanggal Kejadian";

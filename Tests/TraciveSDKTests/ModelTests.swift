@@ -248,6 +248,75 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(restored.fetchedAt, original.fetchedAt)
   }
 
+  // MARK: - QRIS
+
+  /// The API's sample QRIS hit, decoded field by field.
+  func testQrisHitDecodes() throws {
+    let json = """
+      {"checkId":"chk_4d2c0b9a8e7f6a5b4c3d","found":true,"riskTier":"CAUTION","reportTotal":2,
+       "credibleReports":1,"ambiguousReports":1,"firstReportOn":"2026-08","lastReportOn":"2026-09",
+       "fraudAmount":{"IDR":350000},"tags":["barang tidak dikirim"],"relatedScammerCount":0,
+       "qris":{"merchantName":"TOKO CONTOH","city":"JAKARTA","criteria":"UMI","acquirer":"ID.DANA.WWW"},
+       "rightOfReply":{"text":"Kami pemilik usaha ini.","language":"id"},
+       "billing":{"creditSource":"USER","unitsCharged":1},
+       "disclaimer":"This information is indicative. For a QRIS, show it as a warning before they pay."}
+      """
+    let result = try decode(CheckResult.self, json)
+
+    XCTAssertEqual(result.riskTier, .caution)
+    XCTAssertEqual(
+      result.qris,
+      QrisDetails(merchantName: "TOKO CONTOH", city: "JAKARTA", criteria: .umi, acquirer: "ID.DANA.WWW"))
+    XCTAssertEqual(result.rightOfReply, RightOfReply(text: "Kami pemilik usaha ini.", language: "id"))
+    XCTAssertEqual(result.billing?.unitsCharged, 1)
+  }
+
+  /// An unknown criteria is carried as it came, and a malformed one or a malformed object reads as
+  /// absent: none of them may fail the fraud check they ride on.
+  func testQrisFieldsDecodeTolerantly() throws {
+    let unknown = try decode(
+      CheckResult.self, #"{"found":true,"riskTier":"HIGH","qris":{"criteria":"UXX","city":"BOGOR"}}"#)
+    XCTAssertEqual(unknown.qris?.criteria, QrisCriteria(rawValue: "UXX"))
+    XCTAssertEqual(unknown.qris?.city, "BOGOR")
+
+    let wrongType = try decode(
+      CheckResult.self, #"{"found":true,"riskTier":"HIGH","qris":{"criteria":7,"city":"BOGOR"}}"#)
+    XCTAssertNil(wrongType.qris?.criteria)
+    XCTAssertEqual(wrongType.qris?.city, "BOGOR")
+
+    let broken = try decode(
+      CheckResult.self,
+      #"{"found":true,"riskTier":"HIGH","qris":"TOKO","rightOfReply":{"text":"Kami pemilik."}}"#)
+    XCTAssertNil(broken.qris)
+    XCTAssertNil(broken.rightOfReply, "a reply without its language is not the contract's shape")
+    XCTAssertEqual(broken.riskTier, .high)
+  }
+
+  /// Both ride on every detail level and neither is translated, so the cache keeps them, and a
+  /// record written before 0.3.0 still decodes.
+  func testQrisFieldsSurviveTheCacheProjections() throws {
+    let qris = QrisDetails(merchantName: "TOKO CONTOH", criteria: .uke)
+    let reply = RightOfReply(text: "Kami pemilik usaha ini.", language: "id")
+    let result = CheckResult(
+      checkId: "chk_1", found: true, riskTier: .caution, qris: qris, rightOfReply: reply,
+      billing: Billing(creditSource: .user, unitsCharged: 1),
+      fetchedAt: try instant("2026-07-09T10:00:00Z"))
+
+    for copy in [result.cacheableCopy(), result.transactionRecordCopy(), result.withOrigin(.cache)] {
+      XCTAssertEqual(copy.qris, qris)
+      XCTAssertEqual(copy.rightOfReply, reply)
+      let restored = try JSONDecoder().decode(CheckResult.self, from: try JSONEncoder().encode(copy))
+      XCTAssertEqual(restored, copy)
+    }
+
+    let beforeQris = try decode(
+      CheckResult.self,
+      #"{"found":true,"riskTier":"HIGH","origin":"CACHE","fetchedAt":"2026-07-09T10:00:00Z"}"#)
+    XCTAssertNil(beforeQris.qris)
+    XCTAssertNil(beforeQris.rightOfReply)
+    XCTAssertEqual(beforeQris.origin, .cache)
+  }
+
   // MARK: - CachePolicy
 
   func testDefaultTtlsMatchTheSpec() {
@@ -307,7 +376,26 @@ final class ModelTests: XCTestCase {
     XCTAssertEqual(ClientType.allCases.map(\.rawValue), ["PUBLIC", "CONFIDENTIAL"])
     XCTAssertEqual(
       TraciveQuery.Kind.allCases.map(\.rawValue),
-      ["PHONE", "EMAIL", "BANK", "CRYPTO", "USERNAME"])
+      ["PHONE", "EMAIL", "BANK", "CRYPTO", "USERNAME", "QRIS"])
+  }
+
+  /// `Kind` is open: a kind this SDK does not know decodes as itself and encodes back unchanged,
+  /// so the next type the API adds fails nothing.
+  func testQueryKindIsOpenAndRoundTrips() throws {
+    let kinds = try decode([TraciveQuery.Kind].self, #"["QRIS", "PHONE", "DOMAIN"]"#)
+    XCTAssertEqual(kinds, [.qris, .phone, TraciveQuery.Kind(rawValue: "DOMAIN")])
+    XCTAssertFalse(TraciveQuery.Kind.allCases.contains(kinds[2]))
+    let encoded = String(decoding: try JSONEncoder().encode(kinds), as: UTF8.self)
+    XCTAssertEqual(encoded, #"["QRIS","PHONE","DOMAIN"]"#)
+
+    func label(_ kind: TraciveQuery.Kind) -> String {
+      switch kind {
+      case .qris: return "qris"
+      case .phone: return "phone"
+      default: return "other"
+      }
+    }
+    XCTAssertEqual(kinds.map(label), ["qris", "phone", "other"])
   }
 
   func testCreditSourceKeepsUnknownValuesInsteadOfFailing() throws {

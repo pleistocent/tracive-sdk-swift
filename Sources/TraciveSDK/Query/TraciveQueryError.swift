@@ -47,6 +47,21 @@ public enum QueryRejectionReason: String, CaseIterable, Hashable, Sendable {
   case emptyChain = "empty_chain"
   /// The folded key is not a legal record key.
   case invalidDocumentId = "invalid_document_id"
+  /// Not a QRIS payload: it does not start with `000201`, its TLV framing breaks (a partial scan),
+  /// or it does not end in a CRC.
+  case notAQris = "not_a_qris"
+  /// The QRIS payload fails its CRC: the QR was edited or misread. Tell the user the QR is not
+  /// intact rather than calling it unreported.
+  case qrisCrcMismatch = "qris_crc_mismatch"
+  /// The QRIS payload carries no NMID (`ID` and 13 digits in tag 51), so there is no key to look up.
+  case qrisNoNmid = "qris_no_nmid"
+  /// The QRIS belongs to a medium or large business, or names no business size. Only micro and
+  /// small businesses (UMI, UKE) are ever indexed, so the check could only be a billed miss.
+  case qrisNotIndexed = "qris_not_indexed"
+  /// Not an NMID: `ID` followed by 13 digits.
+  case notAnNmid = "not_an_nmid"
+  /// Not a merchant PAN: 18 digits, or 19 whose last digit is the Luhn check digit.
+  case notAPan = "not_a_pan"
 }
 
 /// Thrown by every `TraciveQuery` builder when the input cannot produce a key that could hit.
@@ -107,6 +122,20 @@ public struct TraciveQueryError: Error, Equatable, Hashable, Sendable, CustomStr
       return "The blockchain name is empty."
     case .invalidDocumentId:
       return "The resulting lookup key is not a valid document id."
+    case .notAQris:
+      return "That is not a QRIS code."
+    case .qrisCrcMismatch:
+      return "This QRIS code is not intact: it was edited or misread. Scan it again."
+    case .qrisNoNmid:
+      return "This QRIS code has no merchant NMID to check."
+    case .qrisNotIndexed:
+      return
+        "Tracive only has reports on QRIS codes of micro and small businesses (UMI, UKE), "
+        + "and this one is neither."
+    case .notAnNmid:
+      return "An NMID is ID followed by 13 digits, e.g. ID1020000000033."
+    case .notAPan:
+      return "A merchant PAN is 18 digits, or 19 with its check digit."
     }
   }
 
