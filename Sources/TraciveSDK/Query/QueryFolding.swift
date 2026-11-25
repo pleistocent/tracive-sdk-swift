@@ -3,7 +3,7 @@ import Foundation
 /// The string-folding grammar behind `searchQueryIndex`.
 ///
 /// Every rule here is transcribed from `query-grammar-vectors.json` (`rules`), which is vendored
-/// verbatim into all three SDK repos and is the anti-drift contract. **Do not "improve" a fold**:
+/// verbatim into every SDK repo and is the anti-drift contract. **Do not "improve" a fold**:
 /// the folded key is both the server's document id and the local cache key, so a client-side
 /// deviation splits one entity into two — and a miss is billed.
 ///
@@ -239,7 +239,7 @@ enum QueryFolding {
   // Deliberately ASCII-only. `CharacterSet.decimalDigits` would also match Arabic-Indic and other
   // Unicode digits, which the server's `\d`-based strip does not.
 
-  private static func isAsciiDigit(_ scalar: Unicode.Scalar) -> Bool {
+  static func isAsciiDigit(_ scalar: Unicode.Scalar) -> Bool {
     scalar.value >= 0x30 && scalar.value <= 0x39
   }
 

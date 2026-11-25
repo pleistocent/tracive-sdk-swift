@@ -31,6 +31,11 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   public let topChronologies: [Chronology]?
   /// `detail = .full` only.
   public let comments: [Comment]?
+  /// QRIS hits only, on both detail levels.
+  public let qris: QrisDetails?
+  /// The QRIS owner's reply, on QRIS hits whose owner replied. Show it below the warning, as
+  /// written and untranslated.
+  public let rightOfReply: RightOfReply?
   /// Absent on a cache hit: a cache hit is free, so there is nothing to bill.
   public let billing: Billing?
   /// Legal text that must be surfaced in any UI built on the SDK.
@@ -54,6 +59,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     relatedScammerCount: Int = 0,
     topChronologies: [Chronology]? = nil,
     comments: [Comment]? = nil,
+    qris: QrisDetails? = nil,
+    rightOfReply: RightOfReply? = nil,
     billing: Billing? = nil,
     disclaimer: String? = nil,
     origin: Origin = .server,
@@ -72,6 +79,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     self.relatedScammerCount = relatedScammerCount
     self.topChronologies = topChronologies
     self.comments = comments
+    self.qris = qris
+    self.rightOfReply = rightOfReply
     self.billing = billing
     self.disclaimer = disclaimer
     self.origin = origin
@@ -85,6 +94,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
   /// `topChronologies`, `comments` and `billing` vary with the request, and `checkId` identifies one
   /// specific server-side check, so all four are dropped. `origin` is rewritten to `.cache` because
   /// that is what the entry will be when it is read back.
+  ///
+  /// `qris` and `rightOfReply` survive: both ride on every detail level and neither is translated.
   ///
   /// What survives is invariant across `detail`, but **not** across `locale`: `tags` and
   /// `disclaimer` are localized strings. The cache key is `SHA-256(searchQueryIndex)` with no locale
@@ -111,6 +122,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
       relatedScammerCount: relatedScammerCount,
       topChronologies: nil,
       comments: nil,
+      qris: qris,
+      rightOfReply: rightOfReply,
       billing: nil,
       disclaimer: disclaimer,
       origin: .cache,
@@ -146,6 +159,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
       relatedScammerCount: relatedScammerCount,
       topChronologies: nil,
       comments: nil,
+      qris: qris,
+      rightOfReply: rightOfReply,
       billing: billing,
       disclaimer: disclaimer,
       origin: origin,
@@ -170,6 +185,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
       relatedScammerCount: relatedScammerCount,
       topChronologies: topChronologies,
       comments: comments,
+      qris: qris,
+      rightOfReply: rightOfReply,
       billing: billing,
       disclaimer: disclaimer,
       origin: origin,
@@ -193,6 +210,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     case relatedScammerCount
     case topChronologies
     case comments
+    case qris
+    case rightOfReply
     case billing
     case disclaimer
     case origin
@@ -218,6 +237,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     self.relatedScammerCount = container.traciveInt(.relatedScammerCount, default: 0)
     self.topChronologies = container.traciveDecodeIfPresent([Chronology].self, forKey: .topChronologies)
     self.comments = container.traciveDecodeIfPresent([Comment].self, forKey: .comments)
+    self.qris = container.traciveDecodeIfPresent(QrisDetails.self, forKey: .qris)
+    self.rightOfReply = container.traciveDecodeIfPresent(RightOfReply.self, forKey: .rightOfReply)
     self.billing = container.traciveDecodeIfPresent(Billing.self, forKey: .billing)
     self.disclaimer = container.traciveStringIfPresent(.disclaimer)
 
@@ -243,6 +264,8 @@ public struct CheckResult: Codable, Equatable, Hashable, Sendable {
     try container.encode(relatedScammerCount, forKey: .relatedScammerCount)
     try container.encodeIfPresent(topChronologies, forKey: .topChronologies)
     try container.encodeIfPresent(comments, forKey: .comments)
+    try container.encodeIfPresent(qris, forKey: .qris)
+    try container.encodeIfPresent(rightOfReply, forKey: .rightOfReply)
     try container.encodeIfPresent(billing, forKey: .billing)
     try container.encodeIfPresent(disclaimer, forKey: .disclaimer)
     try container.encode(origin, forKey: .origin)

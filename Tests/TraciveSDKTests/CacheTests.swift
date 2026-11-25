@@ -148,6 +148,26 @@ final class CacheTests: XCTestCase {
     XCTAssertEqual(hit.fetchedAt, CacheTests.t0)
   }
 
+  /// Through the real encrypted store: a QRIS hit's details and its owner's reply come back.
+  func testQrisDetailsAndRightOfReplyRoundTripThroughTheStore() throws {
+    let cache = try SQLiteCheckCache.inMemory(now: TestClock(CacheTests.t0).provider)
+    let query = try TraciveQuery.qris(nmid: "ID9900000000103")
+    let qris = QrisDetails(
+      merchantName: "TOKO CONTOH SANDBOX", city: "JAKARTA", criteria: .umi, acquirer: "ID.DANA.WWW")
+    let reply = RightOfReply(text: "Kami pemilik usaha ini.", language: "id")
+
+    try cache.write(
+      CheckResult(
+        found: true, riskTier: .caution, qris: qris, rightOfReply: reply, origin: .server,
+        fetchedAt: CacheTests.t0),
+      for: query)
+    let hit = try XCTUnwrap(try cache.read(query))
+
+    XCTAssertEqual(hit.qris, qris)
+    XCTAssertEqual(hit.rightOfReply, reply)
+    XCTAssertEqual(hit.origin, .cache)
+  }
+
   func testMissIsNilRatherThanAnError() throws {
     let cache = try SQLiteCheckCache.inMemory(now: TestClock(CacheTests.t0).provider)
     // `Source.cache` must surface `TraciveError.cacheMiss` — but that is the *client's*

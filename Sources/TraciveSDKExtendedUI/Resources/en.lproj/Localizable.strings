@@ -15,6 +15,7 @@
 "media_bank" = "Bank account";
 "media_crypto" = "Crypto address";
 "media_social" = "Social media";
+"media_qris" = "QRIS";
 "media_other" = "Account";
 
 "date_label" = "Date of Incident";

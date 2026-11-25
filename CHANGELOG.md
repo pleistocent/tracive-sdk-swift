@@ -7,6 +7,45 @@ source compatibility until the API freezes at 1.0.
 
 ## [Unreleased]
 
+## [0.3.0]
+
+### Breaking
+- **`TraciveQuery.Kind` is an open struct now, not an enum.** It is `RawRepresentable`, `Codable`,
+  `Hashable` and `Sendable`, with static constants `.phone`, `.email`, `.bank`, `.crypto`,
+  `.username` and the new `.qris`. This is the one deliberate break of the release, made so the next
+  query type the API adds breaks nobody: SwiftPM builds packages without library evolution, so a
+  new enum case, even beside a `case unknown`, would fail every exhaustive `switch` in your app.
+  To migrate:
+  - `case .phone:` patterns still compile. A `switch` over `query.kind` now needs a `default:`.
+  - `Kind(rawValue:)` no longer returns an optional: drop the `if let` or `?` around it.
+  - `Kind.allCases` lists the kinds this version builds; `rawValue` and the encoded form
+    (`"PHONE"`) are unchanged.
+- `QueryRejectionReason` has six new cases (below). A `switch` over it that lists every case needs
+  them or a `default:`.
+
+### Added
+- **QRIS checks**, for organisations whose Tracive agreement covers QRIS. Any other gets
+  `TraciveError.unsupportedInputType`, before anything is charged.
+  - `TraciveQuery.qris(payload:)` takes the text a QR decoder returned and keys on the merchant's
+    NMID. The payload is checked locally first: it must be intact (its CRC), name an NMID and be a
+    micro or small business (UMI or UKE), since no other QRIS is ever in Tracive's reports.
+  - `TraciveQuery.qris(nmid:)` takes the NMID from the sticker, `qris(pan:)` the 18-digit PAN from
+    a receipt (or 19 digits with its Luhn check digit). The server maps a PAN to its NMID after the
+    charge, so the cache keeps a PAN and its NMID as two entries.
+  - New `QueryRejectionReason` cases, spelled as in the shared grammar: `.notAQris`,
+    `.qrisCrcMismatch`, `.qrisNoNmid`, `.qrisNotIndexed`, `.notAnNmid`, `.notAPan`.
+  - Show a QRIS result as a warning before the user pays. Never block or hold a payment on it.
+- `CheckResult.qris` (`QrisDetails`: `merchantName`, `city`, `criteria`, `acquirer`) and
+  `CheckResult.rightOfReply` (`RightOfReply`: `text`, `language`), on both detail levels. Show
+  `rightOfReply.text` below the warning, as written and untranslated. `QrisCriteria` is open like
+  `Kind`: a value this SDK does not know decodes as itself rather than failing the check. Both
+  fields are kept in the cache and in transaction records; rows written by 0.2.x still decode.
+- `TraciveSDKExtendedUI`'s report form shows a QRIS identifier as **QRIS** over its NMID.
+- The example's check screen has a QRIS switch and a button that fills in the sandbox's HIGH QRIS.
+
+### Changed
+- The query grammar fixture is v7, which adds the QRIS rules and vectors.
+
 ## [0.2.2] — 2026-11-08
 
 ### Added
@@ -1023,6 +1062,7 @@ ship the wiring now; expect real verdicts when the backend lands.
 - iOS 15+ / macOS 12+.
 
 [Unreleased]: https://github.com/pleistocent/tracive-sdk-swift/compare/0.2.2...HEAD
+[0.3.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.3.0
 [0.2.2]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.2
 [0.2.1]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.1
 [0.2.0]: https://github.com/pleistocent/tracive-sdk-swift/releases/tag/0.2.0

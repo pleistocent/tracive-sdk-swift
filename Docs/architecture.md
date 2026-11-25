@@ -552,6 +552,18 @@ flowchart TD
   U2["handle NFC, lowercase, trim, keep a leading at-sign"]
   U3["USERNAME_ platform _ handle"]
 
+  Q["TraciveQuery.qris(payload:)"]
+  Q1["trim tab, LF, CR, space, U+00A0 from the ends; read TLV in UTF-16 code units"]
+  Q2{"starts 000201, frames cleanly, ends in tag 63"}
+  Q3{"CRC-16/CCITT-FALSE over the UTF-8 bytes matches"}
+  Q4{"tag 51 holds an NMID"}
+  Q5{"criteria is UMI or UKE"}
+  QN["TraciveQuery.qris(nmid:)"]
+  QN1{"QRIS spaces removed, upper-cased: ID plus 13 ASCII digits"}
+  QP["TraciveQuery.qris(pan:)"]
+  QP1{"QRIS spaces removed: 18 ASCII digits, or 19 passing Luhn"}
+  Q6["QRIS_ plus the NMID or the PAN"]
+
   G["DocumentIdGuard.validate"]
   REJ["throw TraciveQueryError, no request is made"]
   SQI["searchQueryIndex"]
@@ -586,6 +598,23 @@ flowchart TD
   U --> U1 --> U2 --> U3 --> G
   U1 -->|"platform or handle empty"| REJ
 
+  Q --> Q1 --> Q2
+  Q2 -->|"no: not_a_qris"| REJ
+  Q2 -->|"yes"| Q3
+  Q3 -->|"no: qris_crc_mismatch"| REJ
+  Q3 -->|"yes"| Q4
+  Q4 -->|"no: qris_no_nmid"| REJ
+  Q4 -->|"yes"| Q5
+  Q5 -->|"no: qris_not_indexed"| REJ
+  Q5 -->|"yes"| Q6
+  QN --> QN1
+  QN1 -->|"no: not_an_nmid"| REJ
+  QN1 -->|"yes"| Q6
+  QP --> QP1
+  QP1 -->|"no: not_a_pan"| REJ
+  QP1 -->|"yes, first 18 digits"| Q6
+  Q6 --> G
+
   G -->|"illegal key"| REJ
   G --> SQI
   SQI --> WIRE
@@ -616,8 +645,16 @@ flowchart TD
   removed. A BIC is NFC, uppercase and stripped of whitespace, must have the 8- or 11-character BIC
   shape, and is looked up by its first 8 within the given country only. The table is parsed once, on
   first use; an unlisted code is rejected with `unknown_bank_code`.
-- **There is no `domain()` builder.** The API indexes only PHONE, EMAIL, BANK, CRYPTO and USERNAME. A
-  `DOMAIN_…` key would miss every time and you would be charged for every one of those misses.
+- **A QRIS payload is read the way the server's JavaScript reads it.** TLV lengths count UTF-16 code
+  units (`String.utf16`), so an emoji in a merchant name is two, while the CRC runs over the UTF-8
+  bytes. A repeated tag keeps its first value, unknown tags are skipped, and a template that is not
+  TLV inside reads as empty. The criteria is tag 51's sub-tag 03 when it is UMI, UKE, UME or UBE,
+  otherwise sub-tag 03 of the first merchant account template (tags 26–45, in tag order) with a
+  sub-tag 00. The NMID and PAN space set is exactly tab, LF, CR, space and U+00A0, not JavaScript
+  `trim()`'s.
+- **There is no `domain()` builder.** The API indexes only PHONE, EMAIL, BANK, CRYPTO, USERNAME and
+  QRIS. A `DOMAIN_…` key would miss every time and you would be charged for every one of those
+  misses.
 
 The full grammar, including the exact rejection reasons, is in `TraciveQueryError` and in the fixture
 itself. Do not "improve" a fold: the folded key is both the server's record key and the local cache

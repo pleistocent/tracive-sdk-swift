@@ -51,8 +51,8 @@ this package:
 
 | Version | Supported |
 |---|---|
-| 0.2.x | yes |
-| < 0.2 | no |
+| 0.3.x | yes |
+| < 0.3 | no |
 
 Until 1.0, security fixes ship on the latest minor only. There is no backport branch.
 

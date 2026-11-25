@@ -1,10 +1,10 @@
 # Tracive SDK for Swift
 
-Scammer lookup for iOS apps — check a phone number, email, bank account, IBAN, crypto address or
-social handle against Tracive's community fraud index, with a local encrypted cache so the same
-identifier is not billed twice.
+Scammer lookup for iOS apps — check a phone number, email, bank account, IBAN, crypto address,
+social handle or QRIS against Tracive's community fraud index, with a local encrypted cache so the
+same identifier is not billed twice.
 
-**Version 0.2.2 · iOS 15+ / macOS 12+ · Apache-2.0**
+**Version 0.3.0 · iOS 15+ / macOS 12+ · Apache-2.0**
 
 ---
 
@@ -83,7 +83,7 @@ of encrypting the database file — same protection for the data that matters, n
 Swift Package Manager:
 
 ```swift
-.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.2.2")
+.package(url: "https://github.com/pleistocent/tracive-sdk-swift.git", from: "0.3.0")
 ```
 
 then add `TraciveSDK` to your target's dependencies. In Xcode: **File → Add Package Dependencies…**
@@ -201,7 +201,7 @@ rules, and the folding grammar per identifier type — is in
 
 ## Queries
 
-Six builders. Each one folds the input into the canonical `searchQueryIndex` that the server keys
+Seven builders. Each one folds the input into the canonical `searchQueryIndex` that the server keys
 on, and each one throws `TraciveQueryError` if the input cannot produce a key that could ever hit.
 
 ```swift
@@ -211,7 +211,12 @@ try TraciveQuery.bankAccount(countryAlpha3: "IDN", bankCode: "BCA", account: "32
 try TraciveQuery.iban(iban: "DE89 3704 0044 0532 0130 00")
 try TraciveQuery.crypto(chain: "ETH", address: "0x52908400098527886e0f7030069857d2e4169ee7")
 try TraciveQuery.username(platform: "INSTAGRAM", handle: "@scammerx")
+try TraciveQuery.qris(payload: scannedPayload)  // see QRIS below
 ```
+
+`query.kind` says which type a query is. It is an open struct (`.phone`, `.email`, `.bank`,
+`.crypto`, `.username`, `.qris`), not an enum, so a type the API adds later breaks nothing: a
+`switch` over it keeps a `default:`.
 
 `bankAccount` also takes the bank the way your own records may already name it — the national bank
 code or the BIC:
@@ -236,6 +241,42 @@ email, so `EMAIL_budi` is a legal key: it is looked up, it misses, and you are c
 stricter address grammar here would be a downgrade, not an upgrade — rejecting an address the server
 would have matched loses you a real fraud answer, which costs more than one miss. `budi@localhost`,
 `budi@[192.168.0.1]` and `"budi something"@example.com` all build a key.
+
+### QRIS
+
+Only for an organisation whose Tracive agreement covers QRIS. For any other, the check throws
+`TraciveError.unsupportedInputType` before anything is charged.
+
+```swift
+// The text your QR scanner returned for the code the user is about to pay.
+let query = try TraciveQuery.qris(payload: scannedPayload)
+// Or what the user typed: the NMID on the merchant's sticker, or the PAN from a receipt.
+try TraciveQuery.qris(nmid: "ID1020000000033")
+try TraciveQuery.qris(pan: "936009143100000003")
+
+let result = try await client.checkScammer(query)
+showWarningBeforePayment(result)  // never block or hold the payment on it
+if let reply = result.rightOfReply {
+  showBelowTheWarning(reply.text)  // as written, untranslated
+}
+```
+
+- **A warning, never a block.** Show the result before the user pays. Never block, hold or cancel a
+  payment on it automatically; the `disclaimer` on a QRIS check says so too.
+- **The owner's right of reply goes below the warning**, never above it, and exactly as written:
+  do not translate or shorten `rightOfReply.text`. Its `language` is a BCP-47 code.
+- **`result.qris`** carries what Tracive read from the reported QR: `merchantName`, `city`,
+  `criteria` and `acquirer`. The merchant name is whatever the QR's maker typed, so never identify
+  anyone by it. The PAN never comes back.
+- **The payload is checked before any request.** A payload whose CRC fails throws
+  `.qrisCrcMismatch` (the QR was edited or misread: tell the user it is not intact rather than
+  calling it unreported). One with no NMID throws `.qrisNoNmid`. One from a medium or large
+  business (UME, UBE) throws `.qrisNotIndexed`, because only micro and small businesses (UMI, UKE)
+  are ever in Tracive's reports and the check could only be a billed miss. Anything else that is
+  not a QRIS throws `.notAQris`. Static and dynamic QRIS are both accepted.
+- **A PAN is two cache entries away from its NMID.** The server maps a PAN to its NMID after the
+  charge, and a PAN it has never seen is a billed miss. The local cache keys on what you sent, so
+  the same merchant checked by PAN and then by NMID is two entries, and the second check is billed.
 
 ### Local phone formats: `normalizePhoneNumber`
 
@@ -286,12 +327,13 @@ the grammar fixture. If the app folded a number one way and this SDK another, on
 become two record keys, and a report filed in the app would be invisible to a check made here.
 
 **There is no `domain()` builder.** The plan lists a DOMAIN input type; the backend never shipped it
-and emits only PHONE / EMAIL / BANK / CRYPTO / USERNAME. A `DOMAIN_…` key would miss every time, and
-you would be charged for every one of those misses.
+and emits only PHONE / EMAIL / BANK / CRYPTO / USERNAME / QRIS. A `DOMAIN_…` key would miss every
+time, and you would be charged for every one of those misses.
 
 The exact folding rules are pinned by `Tests/TraciveSDKTests/Fixtures/query-grammar-vectors.json`,
-vendored verbatim into the Kotlin, Flutter and Swift SDKs. All three run it as a test, so a fold that
-drifts in one language fails its own build rather than quietly building keys that miss.
+vendored verbatim into the Kotlin, Flutter, Swift and React Native SDKs. All four run it as a test,
+so a fold that drifts in one language fails its own build rather than quietly building keys that
+miss.
 
 ---
 
@@ -523,6 +565,7 @@ Everything throws `TraciveError`. The interesting cases:
 | `.expiredToken` | refresh failed | restart consent |
 | `.invalidToken` | no usable grant is stored. `info.code` says which: `no_grant` — nobody has authorised yet; `unusable_grant` — the stored record lost its access token and had no refresh token left to renew from | call `authorize()`. Nothing was sent to the server, so no call was billed. Worth logging `unusable_grant` separately: it points at local storage, not at the user |
 | `.missingScope` / `.detailNotPermitted` | 403 | your client is not entitled to that call |
+| `.unsupportedInputType` | 400: your organisation cannot look up that query type — today, a QRIS without an agreement that covers it. Nothing was charged | do not offer that check |
 | `.userCreditNotPermitted` | 403 on a check: your contract does not let you charge the user's subscription credits | contact Tracive; retrying will not help |
 | `.translationNotPermitted` | 403 on a `.full` check with a non-English `locale`: your contract withholds translation, or the user has no premium subscription | check again without `locale` for the English result |
 | `.cacheMiss` | `.cache` source with nothing fresh stored — or with `detail: .full`, which no row can answer | go to the server |

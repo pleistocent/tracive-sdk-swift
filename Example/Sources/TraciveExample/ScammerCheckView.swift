@@ -14,7 +14,8 @@ import TraciveSDK
 /// 2. **Provenance is visible.** A cached answer says so, and says how old it is. "We checked and
 ///    found nothing" and "we did not check" must never look the same.
 /// 3. **The verdict is advice, not a ruling.** Even `HIGH` says "do not send money", not
-///    "this is a scammer".
+///    "this is a scammer". On a QRIS it is a warning before paying, never a block on the payment,
+///    and the owner's right of reply sits right below it, as written.
 public struct ScammerCheckView: View {
 
   @StateObject private var model: ScammerCheckModel
@@ -93,14 +94,30 @@ public struct ScammerCheckView: View {
 
   private var inputSection: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Check a phone number")
+      Text(model.mode == .phone ? "Check a phone number" : "Check a QRIS")
         .font(.title2.weight(.semibold))
 
-      Text("Try a number ending in 1, 2, 3, 9, or anything else.")
-        .font(.footnote)
-        .foregroundColor(.secondary)
+      Picker("Check", selection: $model.mode) {
+        ForEach(ScammerCheckMode.allCases) { Text($0.rawValue).tag($0) }
+      }
+      .pickerStyle(.segmented)
+
+      Text(
+        model.mode == .phone
+          ? "Try a number ending in 1, 2, 3, 9, or anything else."
+          : "Paste a scanned QRIS payload, an NMID or a merchant PAN. Your Tracive agreement must "
+            + "cover QRIS."
+      )
+      .font(.footnote)
+      .foregroundColor(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
 
       phoneField
+
+      if model.mode == .qris {
+        Button("Use the sandbox QR") { model.useSandboxQris() }
+          .font(.footnote)
+      }
 
       Button {
         Task { await model.check() }
@@ -119,11 +136,14 @@ public struct ScammerCheckView: View {
   }
 
   private var phoneField: some View {
-    let field = TextField("+62 812 3456 7891", text: $model.input)
-      .textFieldStyle(.roundedBorder)
-      .disableAutocorrection(true)
+    let field = TextField(
+      model.mode == .phone ? "+62 812 3456 7891" : "000201… or ID1020000000033", text: $model.input
+    )
+    .textFieldStyle(.roundedBorder)
+    .disableAutocorrection(true)
     #if os(iOS)
-      return field.keyboardType(.phonePad)
+      return field.keyboardType(model.mode == .phone ? .phonePad : .asciiCapable)
+        .textInputAutocapitalization(.never)
     #else
       return field
     #endif
@@ -143,12 +163,12 @@ public struct ScammerCheckView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.12))
         .cornerRadius(12)
-    case .result(let result):
-      resultCard(result)
+    case .result(let result, let checkedAs):
+      resultCard(result, checkedAs: checkedAs)
     }
   }
 
-  private func resultCard(_ result: CheckResult) -> some View {
+  private func resultCard(_ result: CheckResult, checkedAs: ScammerCheckMode) -> some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
         Circle().fill(color(for: result.riskTier)).frame(width: 12, height: 12)
@@ -157,14 +177,37 @@ public struct ScammerCheckView: View {
         provenanceBadge(result)
       }
 
-      Text(result.riskTier.exampleAdvice)
+      Text(checkedAs == .qris ? result.riskTier.exampleQrisAdvice : result.riskTier.exampleAdvice)
         .font(.subheadline)
         .foregroundColor(.secondary)
         .fixedSize(horizontal: false, vertical: true)
 
+      // Below the warning, never above it, and as written: no translation, no trimming.
+      if let reply = result.rightOfReply {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("The owner's reply").font(.caption.weight(.semibold))
+          Text(reply.text)
+            .font(.subheadline)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.10))
+        .cornerRadius(8)
+      }
+
       if result.found {
         Divider()
         counts(result)
+
+        // Read off the first verified QR in the reports. The name is whatever the QR's maker typed:
+        // show it, never identify anyone by it.
+        if let qris = result.qris {
+          if let name = qris.merchantName { statRow("Recipient", name) }
+          if let city = qris.city { statRow("City", city) }
+          if let criteria = qris.criteria { statRow("Business scale", criteria.rawValue) }
+          if let acquirer = qris.acquirer { statRow("Provider", acquirer) }
+        }
 
         if !result.tags.isEmpty {
           tags(result.tags)
