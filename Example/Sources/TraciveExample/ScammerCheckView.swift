@@ -163,12 +163,12 @@ public struct ScammerCheckView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.orange.opacity(0.12))
         .cornerRadius(12)
-    case .result(let result):
-      resultCard(result)
+    case .result(let result, let checkedAs):
+      resultCard(result, checkedAs: checkedAs)
     }
   }
 
-  private func resultCard(_ result: CheckResult) -> some View {
+  private func resultCard(_ result: CheckResult, checkedAs: ScammerCheckMode) -> some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
         Circle().fill(color(for: result.riskTier)).frame(width: 12, height: 12)
@@ -177,7 +177,7 @@ public struct ScammerCheckView: View {
         provenanceBadge(result)
       }
 
-      Text(model.mode == .qris ? result.riskTier.exampleQrisAdvice : result.riskTier.exampleAdvice)
+      Text(checkedAs == .qris ? result.riskTier.exampleQrisAdvice : result.riskTier.exampleAdvice)
         .font(.subheadline)
         .foregroundColor(.secondary)
         .fixedSize(horizontal: false, vertical: true)

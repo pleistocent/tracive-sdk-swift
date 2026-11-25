@@ -5,7 +5,9 @@ import TraciveSDK
 public enum ScammerCheckState: Equatable {
   case idle
   case checking
-  case result(CheckResult)
+  /// `checkedAs` is the mode the check ran in. The user may switch the picker after the answer
+  /// arrives, and the card must keep the wording for what was actually checked.
+  case result(CheckResult, checkedAs: ScammerCheckMode)
   /// A message that is safe to put in front of a user. It never contains the identifier that was
   /// checked, and never a raw server payload.
   case failure(String)
@@ -59,10 +61,11 @@ public final class ScammerCheckModel: ObservableObject {
   public func check() async {
     guard canCheck else { return }
     state = .checking
+    let checkedAs = mode
 
     let query: TraciveQuery
     do {
-      switch mode {
+      switch checkedAs {
       case .phone:
         query = try TraciveQuery.phone(e164: Self.toE164(input, dialCode: defaultDialCode))
       case .qris:
@@ -79,7 +82,7 @@ public final class ScammerCheckModel: ObservableObject {
     }
 
     do {
-      state = .result(try await checker.check(query))
+      state = .result(try await checker.check(query), checkedAs: checkedAs)
     } catch let error as TraciveError {
       state = .failure(Self.message(for: error))
     } catch {
