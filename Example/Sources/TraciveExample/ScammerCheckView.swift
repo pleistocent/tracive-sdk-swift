@@ -177,7 +177,7 @@ public struct ScammerCheckView: View {
         provenanceBadge(result)
       }
 
-      Text(result.riskTier.exampleAdvice)
+      Text(model.mode == .qris ? result.riskTier.exampleQrisAdvice : result.riskTier.exampleAdvice)
         .font(.subheadline)
         .foregroundColor(.secondary)
         .fixedSize(horizontal: false, vertical: true)
@@ -199,6 +199,15 @@ public struct ScammerCheckView: View {
       if result.found {
         Divider()
         counts(result)
+
+        // Read off the first verified QR in the reports. The name is whatever the QR's maker typed:
+        // show it, never identify anyone by it.
+        if let qris = result.qris {
+          if let name = qris.merchantName { statRow("Recipient", name) }
+          if let city = qris.city { statRow("City", city) }
+          if let criteria = qris.criteria { statRow("Business scale", criteria.rawValue) }
+          if let acquirer = qris.acquirer { statRow("Provider", acquirer) }
+        }
 
         if !result.tags.isEmpty {
           tags(result.tags)

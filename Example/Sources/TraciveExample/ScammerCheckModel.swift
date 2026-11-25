@@ -195,4 +195,18 @@ extension RiskTier {
       return "Nothing reported. That is not a guarantee — most scams are reported after the fact."
     }
   }
+
+  /// The same, for a QRIS. A warning before paying, never a block: the payment stays the user's call.
+  public var exampleQrisAdvice: String {
+    switch self {
+    case .high:
+      return "Multiple credible reports name this QRIS. Check who you are paying before you pay."
+    case .elevated:
+      return "Several reports name this QRIS. Make sure the recipient is who you expect."
+    case .caution:
+      return "One unconfirmed report names this QRIS. A reason to double-check, not proof."
+    case .none:
+      return "Nothing reported for this QRIS. That is not a guarantee."
+    }
+  }
 }
